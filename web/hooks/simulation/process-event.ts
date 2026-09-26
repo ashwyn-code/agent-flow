@@ -11,6 +11,7 @@ import { handleAgentSpawn, handleAgentComplete, handleAgentIdle, handlePermissio
 import { handleToolCallStart, handleToolCallEnd } from './handle-tool-events'
 import { handleMessage, handleContextUpdate } from './handle-message-events'
 import { handleSubagentDispatch, handleSubagentReturn } from './handle-subagent-events'
+import { handleGraphStructure, handleNodeStart, handleNodeEnd, handleGraphAgentComplete } from './handle-graph-events'
 
 export interface ProcessEventContext {
   syncForceSimulation: (agents: Map<string, Agent>, edges: Edge[]) => void
@@ -30,6 +31,7 @@ export interface MutableEventState {
   fileAttention: SimulationState['fileAttention']
   timelineEntries: SimulationState['timelineEntries']
   conversations: Map<string, ConversationMessage[]>
+  graphs: SimulationState['graphs']
 }
 
 /** Close the last open block on a timeline entry and push a new one. */
@@ -68,11 +70,15 @@ export function processEvent(event: SimulationEvent, prev: SimulationState, ctx:
         fileAttention: new Map(prev.fileAttention),
         timelineEntries: new Map(prev.timelineEntries),
         conversations: new Map(prev.conversations),
+        graphs: new Map(prev.graphs),
       }
 
       switch (event.type) {
         case 'agent_spawn':       handleAgentSpawn(event.payload, prev.currentTime, state, ctx); break
-        case 'agent_complete':    handleAgentComplete(event.payload, prev.currentTime, state, ctx); break
+        case 'agent_complete':
+          handleAgentComplete(event.payload, prev.currentTime, state, ctx)
+          handleGraphAgentComplete(event.payload, state)
+          break
         case 'agent_idle':        handleAgentIdle(event.payload, state); break
         case 'model_detected':    handleModelDetected(event.payload, state, ctx); break
         case 'tool_call_start':   handleToolCallStart(event.payload, prev.currentTime, state, ctx); break
@@ -82,6 +88,9 @@ export function processEvent(event: SimulationEvent, prev: SimulationState, ctx:
         case 'subagent_dispatch': handleSubagentDispatch(event.payload, prev.currentTime, state); break
         case 'subagent_return':   handleSubagentReturn(event.payload, prev.currentTime, state); break
         case 'permission_requested': handlePermissionRequested(event.payload, prev.currentTime, state, ctx); break
+        case 'graph_structure':   handleGraphStructure(event.payload, state); break
+        case 'node_start':        handleNodeStart(event.payload, prev.currentTime, state); break
+        case 'node_end':          handleNodeEnd(event.payload, state); break
       }
 
       // Stabilize references for unchanged collections to prevent
@@ -94,5 +103,6 @@ export function processEvent(event: SimulationEvent, prev: SimulationState, ctx:
         fileAttention: mapsEqual(prev.fileAttention, state.fileAttention) ? prev.fileAttention : state.fileAttention,
         timelineEntries: mapsEqual(prev.timelineEntries, state.timelineEntries) ? prev.timelineEntries : state.timelineEntries,
         conversations: mapsEqual(prev.conversations, state.conversations) ? prev.conversations : state.conversations,
+        graphs: mapsEqual(prev.graphs, state.graphs) ? prev.graphs : state.graphs,
       }
 }

@@ -8,6 +8,7 @@ export function useKeyboardShortcuts(actions: {
   toggleHexGrid: () => void
   toggleStats: () => void
   toggleCostOverlay: () => void
+  toggleGraph: () => void
   zoomToFit: () => void
   clearSelection: () => void
   deselectAgent: () => void
@@ -38,6 +39,10 @@ export function useKeyboardShortcuts(actions: {
         case 't':
         case 'T':
           a.toggleTimeline()
+          break
+        case 'n':
+        case 'N':
+          a.toggleGraph()
           break
         case 'Delete':
         case 'Backspace':

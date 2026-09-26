@@ -7,6 +7,7 @@ import type {
   FileAttention,
   TimelineEntry,
   SimulationEvent,
+  AgentGraph,
 } from '@/lib/agent-types'
 import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force'
 
@@ -19,6 +20,8 @@ export interface SimulationState {
   fileAttention: Map<string, FileAttention>
   timelineEntries: Map<string, TimelineEntry>
   conversations: Map<string, ConversationMessage[]>
+  /** Graph shape per agent (only for runtimes that report one) */
+  graphs: Map<string, AgentGraph>
   currentTime: number
   isPlaying: boolean
   speed: number
@@ -39,6 +42,7 @@ export function createEmptyState(overrides?: Partial<SimulationState>): Simulati
     fileAttention: new Map(),
     timelineEntries: new Map(),
     conversations: new Map(),
+    graphs: new Map(),
     currentTime: 0,
     isPlaying: false,
     speed: 1,

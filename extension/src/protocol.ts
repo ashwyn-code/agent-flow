@@ -20,6 +20,10 @@ export type AgentEventType =
   | 'subagent_return'
   | 'permission_requested'
   | 'error'
+  // Graph shape, from framework adapters (e.g. adapters/langgraph)
+  | 'graph_structure'
+  | 'node_start'
+  | 'node_end'
 
 export interface AgentEvent {
   time: number

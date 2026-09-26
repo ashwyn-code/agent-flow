@@ -161,8 +161,61 @@ export interface SimulationEvent {
     | 'subagent_dispatch'
     | 'subagent_return'
     | 'permission_requested'
+    | 'graph_structure'
+    | 'node_start'
+    | 'node_end'
   payload: Record<string, unknown>
   sessionId?: string
+}
+
+// ─── Graph shape (from framework adapters, e.g. LangGraph) ──────────────────
+// One AgentGraph per agent whose runtime is a graph of nodes. Built from
+// `graph_structure` (declared nodes/edges) and `node_start` / `node_end`
+// (observed execution), so routes, loops and merges can be drawn as a graph.
+
+export type GraphNodeKind = 'start' | 'end' | 'node' | 'subgraph'
+
+export interface GraphNodeInfo {
+  id: string
+  label: string
+  kind: GraphNodeKind
+  /** Times this node started */
+  visits: number
+  /** Executions currently in flight */
+  running: number
+  lastStep?: number
+  lastVisitTime?: number
+  error?: string
+  /** Declared by graph_structure (vs. only observed at runtime) */
+  declared: boolean
+}
+
+export interface GraphEdgeInfo {
+  id: string
+  source: string
+  target: string
+  conditional: boolean
+  label?: string
+  /** Times this hop was taken */
+  traversals: number
+  lastTime?: number
+  declared: boolean
+}
+
+export interface AgentGraph {
+  agent: string
+  nodes: Record<string, GraphNodeInfo>
+  edges: Record<string, GraphEdgeInfo>
+  /** Node ids in first-seen order (keeps layout stable as nodes appear) */
+  order: string[]
+  hasStructure: boolean
+  /** Highest superstep seen */
+  lastStep: number
+  totalHops: number
+}
+
+export function graphEdgeId(source: string, target: string): string {
+  return `${source}->${target}`
 }
 
 export interface DepthParticle {

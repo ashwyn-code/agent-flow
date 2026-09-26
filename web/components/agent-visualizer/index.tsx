@@ -22,7 +22,8 @@ import { COLORS } from "@/lib/colors"
 
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
-import { TopBar } from "./top-bar"
+import { TopBar, type ExclusivePanel } from "./top-bar"
+import { GraphPanel } from "./graph-panel"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -42,6 +43,7 @@ export function AgentVisualizer() {
     speed,
     maxTimeReached,
     conversations,
+    graphs,
     play,
     pause,
     restart,
@@ -69,12 +71,14 @@ export function AgentVisualizer() {
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [showGraph, setShowGraph] = useState(false)
 
   // Mutually exclusive panel toggling — opening one closes the others
-  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
+  const toggleExclusivePanel = useCallback((panel: ExclusivePanel) => {
     setShowFileAttention(prev => panel === 'files' ? !prev : false)
     setShowTranscript(prev => panel === 'transcript' ? !prev : false)
     setShowCostOverlay(prev => panel === 'cost' ? !prev : false)
+    setShowGraph(prev => panel === 'graph' ? !prev : false)
   }, [])
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
 
@@ -190,6 +194,7 @@ export function AgentVisualizer() {
     toggleHexGrid: () => { setShowHexGrid(prev => !prev) },
     toggleStats: () => { setShowStats(prev => !prev) },
     toggleCostOverlay: () => toggleExclusivePanel('cost'),
+    toggleGraph: () => toggleExclusivePanel('graph'),
     zoomToFit: () => { setZoomToFitTrigger(n => n + 1) },
     clearSelection: () => { selection.clearAllSelections() },
     deselectAgent: () => { selection.clearAgent() },
@@ -391,6 +396,17 @@ export function AgentVisualizer() {
         onClose={() => setShowTranscript(false)}
       />
 
+      {/* Graph panel: node graph for graph-based runtimes (slide-in from right) */}
+      <GraphPanel
+        visible={showGraph}
+        graphs={graphs}
+        agents={agents}
+        selectedAgentId={selection.selectedAgentId}
+        currentTime={currentTime}
+        onAgentClick={selection.handleAgentClick}
+        onClose={() => setShowGraph(false)}
+      />
+
       {/* Timeline panel (slide-in from bottom) */}
       <TimelinePanel
         visible={showTimeline}
@@ -414,6 +430,8 @@ export function AgentVisualizer() {
         showTranscript={showTranscript}
         showCostOverlay={showCostOverlay}
         showTimeline={showTimeline}
+        showGraph={showGraph}
+        hasGraph={graphs.size > 0}
         isMuted={isMuted}
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}

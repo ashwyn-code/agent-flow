@@ -94,18 +94,24 @@ export interface TopBarProps {
   showTranscript: boolean
   showCostOverlay: boolean
   showTimeline: boolean
+  showGraph: boolean
+  /** The session has graph data (e.g. from the LangGraph adapter) */
+  hasGraph: boolean
   isMuted: boolean
-  onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
+  onTogglePanel: (panel: ExclusivePanel) => void
   onToggleTimeline: () => void
   onToggleMute: () => void
 }
+
+/** Right-side panels that replace each other */
+export type ExclusivePanel = 'files' | 'transcript' | 'cost' | 'graph'
 
 export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
   onSelectSession, onCloseSession,
   isVSCode, connectionStatus,
   agentCount, totalTokens,
-  showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
+  showFileAttention, showTranscript, showCostOverlay, showTimeline, showGraph, hasGraph, isMuted,
   onTogglePanel, onToggleTimeline, onToggleMute,
 }: TopBarProps) {
   return (
@@ -152,6 +158,9 @@ export const TopBar = memo(function TopBar({
           >
             $Cost
           </ToggleButton>
+          {(hasGraph || showGraph) && (
+            <ToggleButton active={showGraph} onClick={() => onTogglePanel('graph')} style={{ background: showGraph ? undefined : 'transparent', border: 'none' }}>Graph</ToggleButton>
+          )}
         </div>
 
         {/* Independent toggles */}

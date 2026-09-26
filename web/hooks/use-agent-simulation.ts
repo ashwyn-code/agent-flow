@@ -7,6 +7,7 @@ import {
   Edge,
   SimulationEvent,
   type TimelineEntry,
+  type AgentGraph,
 } from '@/lib/agent-types'
 import { MOCK_SCENARIO } from '@/lib/mock-scenario'
 import { TOOL_CARD_W, TOOL_CARD_H, FORCE, TOOL_SLOT, BUBBLE_VISIBLE_S, MODEL_FAMILY_CONTEXT, DEFAULT_CONTEXT_SIZE, FALLBACK_CONTEXT_SIZE, ANIM_SPEED } from '@/lib/canvas-constants'
@@ -339,13 +340,28 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     const conversations: SimulationState['conversations'] = new Map()
     for (const id of agents.keys()) conversations.set(id, [])
 
+    // Keep the declared shape of active agents' graphs, but clear execution history
+    const graphs: SimulationState['graphs'] = new Map()
+    for (const [id, graph] of prev.graphs) {
+      if (!agents.has(id) || !graph.hasStructure) continue
+      const nodes: AgentGraph['nodes'] = {}
+      for (const [nid, n] of Object.entries(graph.nodes)) {
+        if (n.declared) nodes[nid] = { ...n, visits: 0, running: 0, lastStep: undefined, lastVisitTime: undefined, error: undefined }
+      }
+      const edges: AgentGraph['edges'] = {}
+      for (const [eid, e] of Object.entries(graph.edges)) {
+        if (e.declared) edges[eid] = { ...e, traversals: 0, lastTime: undefined }
+      }
+      graphs.set(id, { ...graph, nodes, edges, order: graph.order.filter(n => n in nodes), lastStep: 0, totalHops: 0 })
+    }
+
     const eventLog = prev.eventLog.filter(e =>
       e.type === 'agent_spawn' && agents.has(e.payload?.name as string)
     )
 
     const next = {
       ...createEmptyState({ isPlaying: true, speed: prev.speed }),
-      agents, edges, timelineEntries, conversations,
+      agents, edges, timelineEntries, conversations, graphs,
       eventLog, eventIndex: eventLog.length,
     }
     commitState(next)
@@ -420,6 +436,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     currentTime: state.currentTime, isPlaying: state.isPlaying, speed: state.speed,
     maxTimeReached: state.maxTimeReached,
     conversations: state.conversations,
+    graphs: state.graphs,
     play, pause, restart, setSpeed, seekToTime,
     updateAgentPosition,
     saveSnapshot, restoreSnapshot,
