@@ -175,3 +175,17 @@ test('layout handles self-loops and graphs without start/end nodes', () => {
   assert.equal(layout.edges.get('poll->poll')!.kind, 'self')
   assert.equal(layout.nodes.get('poll')!.rank, 0)
 })
+
+test('graphs remember their parent agent, so finished subagents stay reachable', () => {
+  const state = run([
+    ['agent_spawn', { name: 'boss', isMain: true }],
+    ['agent_spawn', { name: 'team #2', parent: 'boss' }],
+    ['graph_structure', { ...REACT_STRUCTURE, agent: 'team #2' }],
+    ['node_start', { agent: 'team #2', node: 'agent', step: 1, from: ['__start__'] }],
+  ])
+  assert.equal(state.graphs.get('team #2')!.parent, 'boss')
+  // The canvas drops finished agents; the graph keeps the link
+  state.agents.delete('team #2')
+  const after = processEvent({ time: 9, type: 'node_end', payload: { agent: 'team #2', node: 'agent', step: 1 } }, state, ctx)
+  assert.equal(after.graphs.get('team #2')!.parent, 'boss')
+})

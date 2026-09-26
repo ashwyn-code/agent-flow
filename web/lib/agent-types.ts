@@ -204,6 +204,8 @@ export interface GraphEdgeInfo {
 
 export interface AgentGraph {
   agent: string
+  /** Parent agent, remembered here because finished agents leave the canvas */
+  parent: string | null
   nodes: Record<string, GraphNodeInfo>
   edges: Record<string, GraphEdgeInfo>
   /** Node ids in first-seen order (keeps layout stable as nodes appear) */

@@ -4,8 +4,8 @@ import { asString } from './types'
 
 const NODE_KINDS: ReadonlySet<string> = new Set(['start', 'end', 'node', 'subgraph'])
 
-function emptyGraph(agent: string): AgentGraph {
-  return { agent, nodes: {}, edges: {}, order: [], hasStructure: false, lastStep: 0, totalHops: 0 }
+function emptyGraph(agent: string, parent: string | null): AgentGraph {
+  return { agent, parent, nodes: {}, edges: {}, order: [], hasStructure: false, lastStep: 0, totalHops: 0 }
 }
 
 function defaultKind(id: string): GraphNodeKind {
@@ -18,8 +18,12 @@ function newNode(id: string, kind: GraphNodeKind, label: string, declared: boole
 
 /** Copy-on-write access to one agent's graph within a processEvent call. */
 function editGraph(state: MutableEventState, agent: string): AgentGraph {
-  const prev = state.graphs.get(agent) ?? emptyGraph(agent)
-  const next: AgentGraph = { ...prev, nodes: { ...prev.nodes }, edges: { ...prev.edges }, order: [...prev.order] }
+  const prev = state.graphs.get(agent) ?? emptyGraph(agent, state.agents.get(agent)?.parentId ?? null)
+  const next: AgentGraph = {
+    ...prev,
+    parent: prev.parent ?? state.agents.get(agent)?.parentId ?? null,
+    nodes: { ...prev.nodes }, edges: { ...prev.edges }, order: [...prev.order],
+  }
   state.graphs.set(agent, next)
   return next
 }

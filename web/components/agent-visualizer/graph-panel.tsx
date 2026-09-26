@@ -22,6 +22,11 @@ interface GraphPanelProps {
   onClose: () => void
 }
 
+/** Parent of an agent. Finished subagents leave the canvas, so fall back to their graph. */
+function parentOf(id: string, graphs: Map<string, AgentGraph>, agents: Map<string, Agent>): string | null {
+  return agents.get(id)?.parentId ?? graphs.get(id)?.parent ?? null
+}
+
 /** Graph to show: the selected agent's, else its nearest ancestor's, else the main agent's. */
 export function pickGraphAgent(graphs: Map<string, AgentGraph>, agents: Map<string, Agent>, selectedAgentId: string | null): string | null {
   let id = selectedAgentId
@@ -29,19 +34,25 @@ export function pickGraphAgent(graphs: Map<string, AgentGraph>, agents: Map<stri
   while (id && !seen.has(id)) {
     if (graphs.has(id)) return id
     seen.add(id)
-    id = agents.get(id)?.parentId ?? null
+    id = parentOf(id, graphs, agents)
   }
   for (const agent of agents.values()) if (agent.isMain && graphs.has(agent.id)) return agent.id
+  for (const graph of graphs.values()) if (graph.parent === null) return graph.agent
   return graphs.keys().next().value ?? null
 }
 
-/** Child agent that ran a subgraph node (parallel runs are named "node #2", ...). */
-function childAgentFor(agents: Map<string, Agent>, parentId: string, nodeLabel: string): Agent | null {
-  let best: Agent | null = null
-  for (const agent of agents.values()) {
-    if (agent.parentId !== parentId) continue
-    if (agent.id !== nodeLabel && !agent.id.startsWith(`${nodeLabel} #`)) continue
-    if (!best || (agent.state !== 'complete' && best.state === 'complete') || agent.spawnTime > best.spawnTime) best = agent
+/**
+ * Subagent graph behind a subgraph node (parallel runs are named "node #2", ...).
+ * Prefers one still running, else the most recently started.
+ */
+function childGraphFor(graphs: Map<string, AgentGraph>, agents: Map<string, Agent>, parentId: string, nodeLabel: string): string | null {
+  let best: string | null = null
+  for (const id of graphs.keys()) {
+    if (id !== nodeLabel && !id.startsWith(`${nodeLabel} #`)) continue
+    if (parentOf(id, graphs, agents) !== parentId) continue
+    const running = agents.get(id)?.state !== undefined && agents.get(id)?.state !== 'complete'
+    const bestRunning = best !== null && agents.get(best)?.state !== undefined && agents.get(best)?.state !== 'complete'
+    if (best === null || (running && !bestRunning) || running === bestRunning) best = id
   }
   return best
 }
@@ -57,11 +68,9 @@ export const GraphPanel = memo(function GraphPanel({
   if (!visible) return null
 
   // Breadcrumb: ancestors of the viewed agent that have graphs of their own
-  const trail: Agent[] = []
-  for (let id: string | null = agentId; id; id = agents.get(id)?.parentId ?? null) {
-    const agent = agents.get(id)
-    if (!agent || trail.includes(agent)) break
-    if (graphs.has(id)) trail.unshift(agent)
+  const trail: string[] = []
+  for (let id: string | null = agentId; id && !trail.includes(id); id = parentOf(id, graphs, agents)) {
+    if (graphs.has(id)) trail.unshift(id)
   }
 
   return (
@@ -73,16 +82,16 @@ export const GraphPanel = memo(function GraphPanel({
           </span>
           {trail.length > 0 && (
             <span className="flex items-center gap-1 min-w-0 text-[9px] font-mono truncate">
-              {trail.map((agent, i) => (
-                <span key={agent.id} className="flex items-center gap-1 min-w-0">
+              {trail.map((id, i) => (
+                <span key={id} className="flex items-center gap-1 min-w-0">
                   {i > 0 && <span style={{ color: COLORS.textMuted }}>›</span>}
                   <button
-                    onClick={() => onAgentClick(agent.id)}
+                    onClick={() => onAgentClick(id)}
                     className="truncate hover:underline"
-                    style={{ color: agent.id === agentId ? COLORS.holoBright : COLORS.textDim, maxWidth: 120 }}
-                    title={agent.name}
+                    style={{ color: id === agentId ? COLORS.holoBright : COLORS.textDim, maxWidth: 120 }}
+                    title={agents.get(id)?.name ?? id}
                   >
-                    {agent.isMain ? agent.id : agent.name}
+                    {id}
                   </button>
                 </span>
               ))}
@@ -98,16 +107,16 @@ export const GraphPanel = memo(function GraphPanel({
           </div>
         ) : (
           <>
-            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+            <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: 'calc(100vh - 220px)' }}>
               <GraphSvg
                 graph={graph}
                 layout={layout}
                 currentTime={now}
                 onOpenSubgraph={(label) => {
-                  const child = childAgentFor(agents, graph.agent, label)
-                  if (child) onAgentClick(child.id)
+                  const child = childGraphFor(graphs, agents, graph.agent, label)
+                  if (child) onAgentClick(child)
                 }}
-                canOpen={(label) => childAgentFor(agents, graph.agent, label) !== null}
+                canOpen={(label) => childGraphFor(graphs, agents, graph.agent, label) !== null}
               />
             </div>
             <GraphFooter graph={graph} layout={layout} />
@@ -157,7 +166,13 @@ function GraphSvg({ graph, layout, currentTime, onOpenSubgraph, canOpen }: Graph
   const ordered = [...edges].sort((a, b) => Math.min(1, a.traversals) - Math.min(1, b.traversals))
 
   return (
-    <svg width={layout.width} height={layout.height} style={{ display: 'block', margin: '0 auto' }} className="font-mono">
+    // Scale wide graphs (e.g. parallel branches) down to the panel width; never up
+    <svg
+      viewBox={`0 0 ${layout.width} ${layout.height}`}
+      width="100%"
+      style={{ display: 'block', margin: '0 auto', maxWidth: layout.width, height: 'auto' }}
+      className="font-mono"
+    >
       <style>{`
         @keyframes af-graph-flow { to { stroke-dashoffset: -20; } }
         @keyframes af-graph-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.9; } }
