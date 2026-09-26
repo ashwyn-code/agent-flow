@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-flow-langgraph"
+version = "0.1.0"
+description = "Stream LangGraph runs into the Agent Flow visualizer"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = ["langchain-core>=0.3"]
+
+[project.optional-dependencies]
+dev = ["langgraph>=0.3", "pytest"]
+
+[tool.setuptools]
+packages = ["agent_flow_langgraph"]
