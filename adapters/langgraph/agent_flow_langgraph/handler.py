@@ -311,9 +311,9 @@ class AgentFlowCallbackHandler(BaseCallbackHandler):
             step = max(steps, default=0) + 1
         earlier = [s for s in steps if s < step]
         sources = self._predecessors(graph_key, node, list(steps[max(earlier)]) if earlier else ["__start__"])
-        nodes_at_step = steps.setdefault(step, [])
-        if node not in nodes_at_step:
-            nodes_at_step.append(node)
+        # One entry per execution, so parallel instances of a node (Send
+        # fan-out) each count as a hop into whatever they flow into.
+        steps.setdefault(step, []).append(node)
         self._node_runs[run_id] = (graph_key, node, step)
         self._emit("node_start", {"agent": agent, "node": node, "step": step, "from": sources})
 

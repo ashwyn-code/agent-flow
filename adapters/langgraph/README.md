@@ -28,11 +28,24 @@ Agent Flow replays what's already in the file and then follows new lines, so it 
 
 Tip: if you set `AGENT_FLOW_EVENT_LOG` once in your shell, both the adapter (when you don't pass `path`) and Agent Flow use it.
 
-To try it without an API key:
+To try it without an API key, run one of the demos. Both use fake LLMs.
 
 ```bash
+# Small: a supervisor hands off to two ReAct agents
 python adapters/langgraph/examples/multi_agent_demo.py --out /tmp/agent-flow.jsonl
+
+# Large: nested multi-agent orchestration, about 20 s at the default --delay 0.6
+python adapters/langgraph/examples/deep_orchestration_demo.py --out /tmp/agent-flow.jsonl
 ```
+
+The large demo (`deep_orchestration_demo.py`) has 17 agents, nested four levels deep:
+
+- **Parallel teams:** a planner sends 3 research teams out at once with `Send`. In each team, a lead fans out to three specialist agents that run in parallel, and a merge node joins their results.
+- **Failure and retry:** one SQL tool call fails, and the agent retries it.
+- **Nested writer:** the writer subgraph contains a drafter subgraph, which runs a section writer (three parallel tool calls) and then a fact checker.
+- **Two review loops:** an editor sends the draft back to the drafter once, and a critic sends the report back to the writer once.
+
+`tests/test_deep_orchestration.py` runs this demo as an end-to-end test.
 
 ### Options
 
