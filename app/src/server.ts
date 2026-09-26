@@ -16,6 +16,8 @@ interface ServerOptions {
   openBrowser: boolean
   workspace: string
   verbose?: boolean
+  /** Event logs from --event-log; falls back to AGENT_FLOW_EVENT_LOG when empty. */
+  eventLogs?: string[]
 }
 
 export async function startServer(options: ServerOptions) {
@@ -28,7 +30,8 @@ export async function startServer(options: ServerOptions) {
   })
   await telemetry.init()
 
-  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry })
+  const eventLogs = options.eventLogs?.length ? options.eventLogs.map(p => path.resolve(p)) : undefined
+  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry, eventLogs })
 
   const server = http.createServer((req, res) => {
     // SSE endpoint

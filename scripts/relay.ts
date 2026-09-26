@@ -15,6 +15,7 @@ import { readNewFileLines, foldPathCase } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
 import { handlePermissionDetection } from '../extension/src/permission-detection'
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
+import { EventLogWatcher, parseEventLogPaths } from './event-log-watcher'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
@@ -367,6 +368,10 @@ export interface RelayOptions {
    *  Mirrors the extension's `agentVisualizer.runtime` setting so users of the
    *  dev relay and `npx agent-flow-app` have a way to opt out of one runtime. */
   runtime?: RelayRuntimeMode
+  /** Generic Agent Flow JSONL event logs to tail (e.g. from adapters/langgraph).
+   *  Defaults to the AGENT_FLOW_EVENT_LOG env var (paths joined by the platform
+   *  path delimiter). Watched regardless of `runtime`. */
+  eventLogs?: string[]
 }
 
 function resolveRuntimeMode(explicit?: RelayRuntimeMode): RelayRuntimeMode {
@@ -439,6 +444,18 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     codexWatcher.start()
   }
 
+  // ─── Generic JSONL event logs ─────────────────────────────────────────────
+  const eventLogPaths = options.eventLogs ?? parseEventLogPaths(process.env.AGENT_FLOW_EVENT_LOG)
+  const eventLogWatchers = eventLogPaths.map(filePath => {
+    const watcher = new EventLogWatcher(filePath, {
+      onEvent: broadcastEvent,
+      onLifecycle: broadcastSessionLifecycle,
+    })
+    console.log(`Watching event log: ${filePath}`)
+    watcher.start()
+    return watcher
+  })
+
   const telemetry = options.telemetry
   const sessionStart = Date.now()
   let relayDisposed = false
@@ -496,6 +513,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         })
       }
       if (codexWatcher) sessionList.push(...codexWatcher.getActiveSessions())
+      for (const watcher of eventLogWatchers) sessionList.push(...watcher.getSessions())
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
@@ -542,6 +560,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         }
       }
       codexWatcher?.dispose()
+      for (const watcher of eventLogWatchers) watcher.dispose()
     },
   }
 }

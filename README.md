@@ -40,6 +40,7 @@ Options:
 - `--port <number>` — change the server port (default: 3001)
 - `--no-open` — don't open the browser automatically
 - `--verbose` — show detailed event logs
+- `--event-log <path>` — also show a JSONL event log, e.g. from the [LangGraph adapter](adapters/langgraph/) (repeatable)
 
 ### Standalone Web App (from source)
 
@@ -74,10 +75,14 @@ For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 ### JSONL Event Log
 
-You can also point Agent Flow at a JSONL event log file:
+You can also point Agent Flow at a JSONL event log file. Other agent frameworks can use this route. See the [LangGraph adapter](adapters/langgraph/).
 
-1. Set `agentVisualizer.eventLogPath` in your VS Code settings to the path of a `.jsonl` file
-2. Agent Flow will tail the file and visualize events as they arrive
+- **VS Code:** set `agentVisualizer.eventLogPath` to the path of a `.jsonl` file
+- **Standalone:** run `npx agent-flow-app --event-log <path>`, or set `AGENT_FLOW_EVENT_LOG=<path>` before `pnpm run dev`. Separate multiple paths with `:` (`;` on Windows)
+
+Agent Flow replays the file and then follows it as events are added. In the standalone app each log gets its own session tab, and truncating the file starts a fresh session.
+
+Runtimes built on node graphs (e.g. LangGraph) can also report their graph shape. The **Graph** panel (top bar, or `N`) then draws the actual nodes, routes, loops and merges, with live execution state, next to the agent tree.
 
 ## Commands
 
