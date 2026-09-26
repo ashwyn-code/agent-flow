@@ -403,6 +403,7 @@ export function AgentVisualizer() {
         agents={agents}
         selectedAgentId={selection.selectedAgentId}
         currentTime={currentTime}
+        isPlaying={isPlaying}
         onAgentClick={selection.handleAgentClick}
         onClose={() => setShowGraph(false)}
       />

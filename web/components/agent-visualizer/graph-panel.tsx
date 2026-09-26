@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Z, type Agent, type AgentGraph, type GraphNodeInfo } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { layoutGraph, type LayoutEdge, type LayoutNode } from '@/lib/graph-layout'
@@ -17,6 +17,7 @@ interface GraphPanelProps {
   agents: Map<string, Agent>
   selectedAgentId: string | null
   currentTime: number
+  isPlaying: boolean
   onAgentClick: (agentId: string) => void
   onClose: () => void
 }
@@ -46,11 +47,12 @@ function childAgentFor(agents: Map<string, Agent>, parentId: string, nodeLabel: 
 }
 
 export const GraphPanel = memo(function GraphPanel({
-  visible, graphs, agents, selectedAgentId, currentTime, onAgentClick, onClose,
+  visible, graphs, agents, selectedAgentId, currentTime, isPlaying, onAgentClick, onClose,
 }: GraphPanelProps) {
   const agentId = visible ? pickGraphAgent(graphs, agents, selectedAgentId) : null
   const graph = agentId ? graphs.get(agentId) ?? null : null
   const layout = useMemo(() => (graph ? layoutGraph(graph) : null), [graph])
+  const now = useSimulationClock(currentTime, isPlaying && visible)
 
   if (!visible) return null
 
@@ -100,7 +102,7 @@ export const GraphPanel = memo(function GraphPanel({
               <GraphSvg
                 graph={graph}
                 layout={layout}
-                currentTime={currentTime}
+                currentTime={now}
                 onOpenSubgraph={(label) => {
                   const child = childAgentFor(agents, graph.agent, label)
                   if (child) onAgentClick(child.id)
@@ -115,6 +117,29 @@ export const GraphPanel = memo(function GraphPanel({
     </SlidingPanel>
   )
 })
+
+/**
+ * The simulation time React sees only changes when events arrive, so after the
+ * last event "just taken" highlights would never expire. While playing,
+ * extrapolate from the last reported time with the wall clock; when paused
+ * (review/scrub), hold the reported time.
+ */
+function useSimulationClock(currentTime: number, running: boolean): number {
+  const anchor = useRef({ sim: currentTime, wall: 0 })
+  const [, setTick] = useState(0)
+
+  if (anchor.current.sim !== currentTime) anchor.current = { sim: currentTime, wall: performance.now() }
+
+  useEffect(() => {
+    if (!running) return
+    if (!anchor.current.wall) anchor.current.wall = performance.now()
+    const id = setInterval(() => setTick(t => t + 1), 250)
+    return () => clearInterval(id)
+  }, [running])
+
+  if (!running || !anchor.current.wall) return currentTime
+  return anchor.current.sim + (performance.now() - anchor.current.wall) / 1000
+}
 
 // ─── SVG ─────────────────────────────────────────────────────────────────────
 
