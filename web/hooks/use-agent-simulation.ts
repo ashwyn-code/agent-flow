@@ -50,6 +50,8 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const animateRef = useRef<(timestamp: number) => void>(() => {})
   /** Throttle React UI updates to ~4/sec — canvas stays smooth via frameRef */
   const lastUIUpdateRef = useRef(0)
+  /** Pending trailing UI update, so events that land inside the throttle window still render */
+  const trailingUIUpdateRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ─── d3-force simulation ─────────────────────────────────────────────────
   useEffect(() => {
@@ -272,9 +274,18 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
 
     // Throttle React re-renders — UI updates at ~4/sec, canvas stays smooth via frameRef
     if (newEvents.length > 0) {
-      if (!lastUIUpdateRef.current || timestamp - lastUIUpdateRef.current >= UI_THROTTLE_MS) {
+      const sinceLastUpdate = timestamp - lastUIUpdateRef.current
+      if (!lastUIUpdateRef.current || sinceLastUpdate >= UI_THROTTLE_MS) {
         setState(frameRef.current)
         lastUIUpdateRef.current = timestamp
+      } else if (!trailingUIUpdateRef.current) {
+        // Without this, a burst of final events (e.g. a run finishing) reaches
+        // the canvas but never the panels until some later event arrives.
+        trailingUIUpdateRef.current = setTimeout(() => {
+          trailingUIUpdateRef.current = null
+          lastUIUpdateRef.current = performance.now()
+          setState(frameRef.current)
+        }, UI_THROTTLE_MS - sinceLastUpdate)
       }
     }
 
@@ -294,6 +305,10 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     }
     return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current) }
   }, [state.isPlaying])
+
+  useEffect(() => () => {
+    if (trailingUIUpdateRef.current) clearTimeout(trailingUIUpdateRef.current)
+  }, [])
 
   // ─── Playback controls ───────────────────────────────────────────────────
   const play = useCallback(() => {
