@@ -189,3 +189,19 @@ test('graphs remember their parent agent, so finished subagents stay reachable',
   const after = processEvent({ time: 9, type: 'node_end', payload: { agent: 'team #2', node: 'agent', step: 1 } }, state, ctx)
   assert.equal(after.graphs.get('team #2')!.parent, 'boss')
 })
+
+test('a loop leaving a left-hand node is routed on the left, clear of its siblings', () => {
+  // Swarm-like: architect hands to security or performance; security hands back
+  const layout = layoutGraph(graphOf({
+    agent: 's',
+    nodes: ['__start__', 'architect', 'security', 'performance', '__end__'].map(id => ({ id, label: id, kind: id.startsWith('__') ? (id === '__start__' ? 'start' : 'end') : 'node' })),
+    edges: [['__start__', 'architect'], ['architect', 'security'], ['architect', 'performance'], ['security', 'architect'], ['performance', '__end__']]
+      .map(([source, target]) => ({ source, target, conditional: false })),
+  }))
+  const security = layout.nodes.get('security')!, performance = layout.nodes.get('performance')!
+  assert.ok(security.x < performance.x)
+  const loop = layout.edges.get('security->architect')!
+  assert.equal(loop.kind, 'back')
+  assert.ok(loop.labelX < security.x, 'loop lane is left of the security node')
+  assert.ok(Math.min(...[...layout.nodes.values()].map(n => n.x)) > 0, 'room was made for the left lane')
+})

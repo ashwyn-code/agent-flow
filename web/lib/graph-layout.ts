@@ -162,6 +162,24 @@ export function layoutGraph(graph: AgentGraph): GraphLayout {
   })
   const height = Math.max(PAD * 2, y - RANK_GAP + PAD)
 
+  // ─── Loop lanes ───────────────────────────────────────────────────────────
+  // Each back edge gets a lane on the side its source sits on (left of the
+  // graph's centre loops left), so it never sweeps across a sibling node.
+  // Shorter spans take inner lanes so arcs nest.
+  const loops = edgeList
+    .filter(e => back.has(e.id) && e.source !== e.target)
+    .sort((a, b) => Math.abs(rank.get(a.source)! - rank.get(a.target)!) - Math.abs(rank.get(b.source)! - rank.get(b.target)!))
+  const centre = PAD + contentW / 2
+  const laneOf = new Map<string, { side: 'left' | 'right'; lane: number }>()
+  let leftLanes = 0, rightLanes = 0
+  for (const e of loops) {
+    const s = nodes.get(e.source)!
+    const side = s.x + s.w / 2 < centre - 1 ? 'left' : 'right'
+    laneOf.set(e.id, { side, lane: side === 'left' ? leftLanes++ : rightLanes++ })
+  }
+  const shift = leftLanes * LANE_GAP
+  if (shift) for (const n of nodes.values()) n.x += shift
+
   // ─── Edge paths ───────────────────────────────────────────────────────────
   const edges = new Map<string, LayoutEdge>()
   for (const e of forward) {
@@ -176,19 +194,18 @@ export function layoutGraph(graph: AgentGraph): GraphLayout {
     })
   }
 
-  // Loops: one lane per back edge, outermost for the longest span so arcs nest.
-  const loops = edgeList
-    .filter(e => back.has(e.id) && e.source !== e.target)
-    .sort((a, b) => Math.abs(rank.get(a.source)! - rank.get(a.target)!) - Math.abs(rank.get(b.source)! - rank.get(b.target)!))
-  let rightmost = PAD + contentW
-  loops.forEach((e, lane) => {
+  let rightmost = shift + PAD + contentW
+  for (const e of loops) {
     const s = nodes.get(e.source)!, t = nodes.get(e.target)!
+    const { side, lane } = laneOf.get(e.id)!
     const lo = Math.min(s.rank, t.rank), hi = Math.max(s.rank, t.rank)
-    let spanRight = 0
-    for (const n of nodes.values()) if (n.rank >= lo && n.rank <= hi) spanRight = Math.max(spanRight, n.x + n.w)
-    const laneX = spanRight + LANE_GAP * (lane + 1)
-    const sx = s.x + s.w, sy = s.y + s.h / 2
-    const tx = t.x + t.w, ty = t.y + t.h / 2
+    const span = [...nodes.values()].filter(n => n.rank >= lo && n.rank <= hi)
+    const left = side === 'left'
+    const laneX = left
+      ? Math.min(...span.map(n => n.x)) - LANE_GAP * (lane + 1)
+      : Math.max(...span.map(n => n.x + n.w)) + LANE_GAP * (lane + 1)
+    const sx = left ? s.x : s.x + s.w, sy = s.y + s.h / 2
+    const tx = left ? t.x : t.x + t.w, ty = t.y + t.h / 2
     // A cubic with both control points at cx peaks at ~0.75 of the way there.
     const cx = sx + (laneX - sx) * 4 / 3
     const cx2 = tx + (laneX - tx) * 4 / 3
@@ -197,8 +214,8 @@ export function layoutGraph(graph: AgentGraph): GraphLayout {
       path: `M ${sx} ${sy} C ${cx} ${sy}, ${cx2} ${ty}, ${tx} ${ty}`,
       labelX: laneX, labelY: (sy + ty) / 2,
     })
-    rightmost = Math.max(rightmost, laneX)
-  })
+    if (!left) rightmost = Math.max(rightmost, laneX)
+  }
 
   for (const e of edgeList) {
     if (e.source !== e.target) continue
