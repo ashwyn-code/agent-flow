@@ -75,14 +75,14 @@ For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 ### JSONL Event Log
 
-You can also point Agent Flow at a JSONL event log file. Other agent frameworks can use this route. See the [LangGraph adapter](adapters/langgraph/).
+You can also point Agent Flow at a JSONL event log file. Other agent frameworks can use this route. See the adapters for [LangGraph](adapters/langgraph/) and [Strands Agents](adapters/strands/).
 
 - **VS Code:** set `agentVisualizer.eventLogPath` to the path of a `.jsonl` file
 - **Standalone:** run `npx agent-flow-app --event-log <path>`, or set `AGENT_FLOW_EVENT_LOG=<path>` before `pnpm run dev`. Separate multiple paths with `:` (`;` on Windows)
 
 Agent Flow replays the file and then follows it as events are added. In the standalone app each log gets its own session tab, and truncating the file starts a fresh session.
 
-Runtimes built on node graphs (e.g. LangGraph) can also report their graph shape. The **Graph** panel (top bar, or `N`) then draws the actual nodes, routes, loops and merges, with live execution state, next to the agent tree.
+Runtimes built on node graphs (e.g. LangGraph, or Strands Graphs and Swarms) can also report their graph shape. The **Graph** panel (top bar, or `N`) then draws the actual nodes, routes, loops and merges, with live execution state, next to the agent tree.
 
 ## Commands
 
