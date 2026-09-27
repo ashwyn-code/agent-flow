@@ -6,6 +6,7 @@ export function parseArgs(argv: string[]) {
   let open = true
   let verbose = false
   const eventLogs: string[] = []
+  const otelFiles: string[] = []
   let ingestHost: string | undefined
   let ingestPort: number | undefined
   let ingestToken: string | undefined = process.env.AGENT_FLOW_INGEST_TOKEN || undefined
@@ -19,6 +20,8 @@ export function parseArgs(argv: string[]) {
     } else if ((arg === '--event-log' || arg === '-e') && argv[i + 1]) {
       eventLogs.push(argv[i + 1])
       i++
+    } else if (arg === '--otel-file' && argv[i + 1]) {
+      otelFiles.push(argv[++i])
     } else if (arg === '--ingest-host' && argv[i + 1]) {
       ingestHost = argv[++i]
     } else if (arg === '--ingest-port' && argv[i + 1]) {
@@ -39,12 +42,16 @@ Options:
   -e, --event-log <path>
                        Also show an Agent Flow JSONL event log, e.g. from the
                        LangGraph adapter (repeatable; AGENT_FLOW_EVENT_LOG also works)
+  --otel-file <path>   Also show the traces in an OTLP JSON file, e.g. an OpenTelemetry
+                       Collector file exporter's output (repeatable; AGENT_FLOW_OTEL_FILE)
   --ingest-token <token>
-                       Require this bearer token on POST /ingest (AGENT_FLOW_INGEST_TOKEN)
+                       Require this bearer token on POST /ingest and POST /v1/traces
+                       (AGENT_FLOW_INGEST_TOKEN)
   --ingest-host <host>, --ingest-port <port>
-                       Also accept POST /ingest on a separate listener, e.g. 0.0.0.0:3101,
-                       so agents on other hosts can send events. It serves /ingest only
-                       (the UI stays on 127.0.0.1) and requires --ingest-token.
+                       Also accept POST /ingest and OTLP POST /v1/traces on a separate
+                       listener, e.g. 0.0.0.0:3101, so agents and collectors on other hosts
+                       can send events. It serves only those two paths (the UI stays on
+                       127.0.0.1) and requires --ingest-token.
   --no-open            Don't open the browser automatically
   -v, --verbose        Show detailed event logs
   -h, --help           Show this help message
@@ -53,5 +60,5 @@ Options:
     }
   }
 
-  return { port, open, verbose, eventLogs, ingestHost, ingestPort, ingestToken }
+  return { port, open, verbose, eventLogs, otelFiles, ingestHost, ingestPort, ingestToken }
 }

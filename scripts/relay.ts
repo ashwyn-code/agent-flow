@@ -17,6 +17,7 @@ import { handlePermissionDetection } from '../extension/src/permission-detection
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
 import { EventLogWatcher, parseEventLogPaths } from './event-log-watcher'
 import { IngestServer } from './ingest'
+import { OtlpFileWatcher, OtlpReceiver, parseOtlpFilePaths } from './otel/receiver'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
@@ -357,6 +358,8 @@ export interface Relay {
   handleSSE: (req: http.IncomingMessage, res: http.ServerResponse) => void
   /** Handle `POST /ingest` (events from adapters' HTTP transport) */
   handleIngest: (req: http.IncomingMessage, res: http.ServerResponse) => void
+  /** Handle `POST /v1/traces` (OpenTelemetry traces over OTLP/HTTP) */
+  handleOtlp: (req: http.IncomingMessage, res: http.ServerResponse) => void
   /** Clean up all resources */
   dispose: () => void
 }
@@ -378,6 +381,9 @@ export interface RelayOptions {
   /** Bearer token required on `POST /ingest`. Defaults to AGENT_FLOW_INGEST_TOKEN.
    *  Without one, only loopback clients may post events. */
   ingestToken?: string
+  /** OTLP JSON trace files to show (e.g. a collector file exporter's output).
+   *  Defaults to the AGENT_FLOW_OTEL_FILE env var. */
+  otelFiles?: string[]
 }
 
 function resolveRuntimeMode(explicit?: RelayRuntimeMode): RelayRuntimeMode {
@@ -463,10 +469,24 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   })
 
   // ─── HTTP ingest ──────────────────────────────────────────────────────────
+  const ingestToken = options.ingestToken ?? (process.env.AGENT_FLOW_INGEST_TOKEN || undefined)
   const ingest = new IngestServer(
     { onEvent: broadcastEvent, onLifecycle: broadcastSessionLifecycle },
-    { token: options.ingestToken ?? (process.env.AGENT_FLOW_INGEST_TOKEN || undefined) },
+    { token: ingestToken },
   )
+
+  // ─── OpenTelemetry traces ─────────────────────────────────────────────────
+  const otlp = new OtlpReceiver(
+    { onEvent: broadcastEvent, onLifecycle: broadcastSessionLifecycle },
+    { token: ingestToken },
+  )
+  const otelFiles = options.otelFiles ?? parseOtlpFilePaths(process.env.AGENT_FLOW_OTEL_FILE)
+  const otlpFileWatchers = otelFiles.map(filePath => {
+    const watcher = new OtlpFileWatcher(filePath, otlp)
+    console.log(`Watching OpenTelemetry trace file: ${filePath}`)
+    watcher.start()
+    return watcher
+  })
 
   const telemetry = options.telemetry
   const sessionStart = Date.now()
@@ -503,6 +523,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       ingest.handle(req, res)
     },
 
+    handleOtlp(req: http.IncomingMessage, res: http.ServerResponse) {
+      otlp.handle(req, res)
+    },
+
     handleSSE(req: http.IncomingMessage, res: http.ServerResponse) {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -531,6 +555,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       if (codexWatcher) sessionList.push(...codexWatcher.getActiveSessions())
       for (const watcher of eventLogWatchers) sessionList.push(...watcher.getSessions())
       sessionList.push(...ingest.getSessions())
+      sessionList.push(...otlp.getSessions())
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
@@ -578,6 +603,8 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       }
       codexWatcher?.dispose()
       for (const watcher of eventLogWatchers) watcher.dispose()
+      for (const watcher of otlpFileWatchers) watcher.dispose()
+      otlp.dispose()
     },
   }
 }

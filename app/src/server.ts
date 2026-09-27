@@ -22,6 +22,8 @@ interface ServerOptions {
   ingestHost?: string
   ingestPort?: number
   ingestToken?: string
+  /** OTLP JSON trace files from --otel-file; falls back to AGENT_FLOW_OTEL_FILE when empty. */
+  otelFiles?: string[]
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -43,7 +45,8 @@ export async function startServer(options: ServerOptions) {
     console.error('Refusing to accept events from other hosts without a token: pass --ingest-token or set AGENT_FLOW_INGEST_TOKEN.')
     process.exit(1)
   }
-  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry, eventLogs, ingestToken: options.ingestToken })
+  const otelFiles = options.otelFiles?.length ? options.otelFiles.map(p => path.resolve(p)) : undefined
+  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry, eventLogs, ingestToken: options.ingestToken, otelFiles })
 
   const server = http.createServer((req, res) => {
     // SSE endpoint
@@ -56,6 +59,11 @@ export async function startServer(options: ServerOptions) {
       return relay.handleIngest(req, res)
     }
 
+    // OpenTelemetry traces over OTLP/HTTP
+    if (req.url === '/v1/traces') {
+      return relay.handleOtlp(req, res)
+    }
+
     // Static files (UI)
     if (req.method === 'GET') {
       return serveStatic(req, res)
@@ -65,18 +73,20 @@ export async function startServer(options: ServerOptions) {
     res.end('Not found')
   })
 
-  // Optional network listener that serves nothing but /ingest
+  // Optional network listener that serves nothing but /ingest and /v1/traces
   let ingestServer: http.Server | null = null
   if (options.ingestHost || options.ingestPort) {
     const ingestHost = options.ingestHost ?? '127.0.0.1'
     const ingestPort = options.ingestPort ?? port + 100
     ingestServer = http.createServer((req, res) => {
       if (req.url === '/ingest') return relay.handleIngest(req, res)
+      if (req.url === '/v1/traces') return relay.handleOtlp(req, res)
       res.writeHead(404)
       res.end('Not found')
     })
     ingestServer.listen(ingestPort, ingestHost, () => {
-      console.log(`Accepting events at http://${ingestHost}:${ingestPort}/ingest${options.ingestToken ? ' (token required)' : ''}`)
+      const base = `http://${ingestHost}:${ingestPort}`
+      console.log(`Accepting events at ${base}/ingest and OpenTelemetry traces at ${base}/v1/traces${options.ingestToken ? ' (token required)' : ''}`)
     })
   }
 

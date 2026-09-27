@@ -42,7 +42,7 @@ function tokenMatches(header: string | undefined, token: string): boolean {
   return given.length === expected.length && crypto.timingSafeEqual(given, expected)
 }
 
-function send(res: http.ServerResponse, status: number, body: Record<string, unknown>): void {
+export function send(res: http.ServerResponse, status: number, body: Record<string, unknown>): void {
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(body))
 }
@@ -54,6 +54,51 @@ function toEvent(raw: unknown): AgentEvent | null {
   return { time, type: type as AgentEvent['type'], payload: payload && typeof payload === 'object' ? payload as Record<string, unknown> : {} }
 }
 
+/**
+ * Check a request against the ingest access rules (bearer token when one is
+ * configured, loopback clients only otherwise). Sends the refusal and returns
+ * false when it isn't allowed. Shared by `/ingest` and OTLP `/v1/traces`.
+ */
+export function authorize(req: http.IncomingMessage, res: http.ServerResponse, token: string | undefined): boolean {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    send(res, 405, { error: 'use POST' })
+    return false
+  }
+  if (token) {
+    if (!tokenMatches(req.headers.authorization, token)) {
+      send(res, 401, { error: 'missing or wrong bearer token' })
+      return false
+    }
+  } else if (!isLoopback(req.socket.remoteAddress)) {
+    send(res, 403, { error: 'set an ingest token to accept events from other hosts' })
+    return false
+  }
+  return true
+}
+
+/** Read a request body of at most `maxBytes`, answering 413 past that. */
+export function readBody(req: http.IncomingMessage, res: http.ServerResponse, maxBytes: number, onBody: (body: Buffer) => void): void {
+  const declared = Number(req.headers['content-length'] ?? 0)
+  if (declared > maxBytes) return send(res, 413, { error: `body over ${maxBytes} bytes` })
+  const chunks: Buffer[] = []
+  let size = 0
+  let aborted = false
+  req.on('data', (chunk: Buffer) => {
+    size += chunk.length
+    if (size > maxBytes && !aborted) {
+      aborted = true
+      send(res, 413, { error: `body over ${maxBytes} bytes` })
+      req.destroy()
+    } else if (!aborted) {
+      chunks.push(chunk)
+    }
+  })
+  req.on('end', () => {
+    if (!aborted) onBody(Buffer.concat(chunks))
+  })
+}
+
 export class IngestServer {
   private readonly trackers = new Map<string, SessionTracker>()
 
@@ -63,39 +108,13 @@ export class IngestServer {
     return [...this.trackers.values()].flatMap(t => t.getSessions())
   }
 
-  /** Accept (or refuse) one request. Returns the number of events accepted. */
+  /** Accept (or refuse) one request. */
   handle(req: http.IncomingMessage, res: http.ServerResponse): void {
-    if (req.method !== 'POST') {
-      res.setHeader('Allow', 'POST')
-      return send(res, 405, { error: 'use POST' })
-    }
-    const token = this.options.token
-    if (token) {
-      if (!tokenMatches(req.headers.authorization, token)) return send(res, 401, { error: 'missing or wrong bearer token' })
-    } else if (!isLoopback(req.socket.remoteAddress)) {
-      return send(res, 403, { error: 'set an ingest token to accept events from other hosts' })
-    }
-
-    const declared = Number(req.headers['content-length'] ?? 0)
-    if (declared > MAX_BODY_BYTES) return send(res, 413, { error: `body over ${MAX_BODY_BYTES} bytes` })
-    const chunks: Buffer[] = []
-    let size = 0
-    let aborted = false
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > MAX_BODY_BYTES && !aborted) {
-        aborted = true
-        send(res, 413, { error: `body over ${MAX_BODY_BYTES} bytes` })
-        req.destroy()
-      } else if (!aborted) {
-        chunks.push(chunk)
-      }
-    })
-    req.on('end', () => {
-      if (aborted) return
+    if (!authorize(req, res, this.options.token)) return
+    readBody(req, res, MAX_BODY_BYTES, raw => {
       let body: Record<string, unknown>
       try {
-        body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        body = JSON.parse(raw.toString('utf8'))
       } catch {
         return send(res, 400, { error: 'body is not JSON' })
       }
@@ -110,8 +129,8 @@ export class IngestServer {
       const tracker = this.tracker(session.id, typeof session.label === 'string' ? session.label : '')
       if (!tracker) return send(res, 429, { error: 'too many sessions' })
       let accepted = 0
-      for (const raw of events) {
-        const event = toEvent(raw)
+      for (const item of events) {
+        const event = toEvent(item)
         if (event) {
           tracker.handle(event)
           accepted++

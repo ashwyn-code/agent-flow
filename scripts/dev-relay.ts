@@ -38,6 +38,9 @@ async function main() {
     if (req.url === '/ingest') {
       return relay.handleIngest(req, res)
     }
+    if (req.url === '/v1/traces') {
+      return relay.handleOtlp(req, res)
+    }
 
     res.writeHead(200, { 'Content-Type': 'text/plain' })
     res.end('Agent Flow Dev Relay')

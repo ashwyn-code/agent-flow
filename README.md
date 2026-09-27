@@ -30,6 +30,7 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
   - **Claude Code hooks:** a lightweight HTTP hook server receives events straight from Claude Code, with zero latency.
   - **Codex rollout tailing:** reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and shows tool calls, reasoning and authoritative token counts from Codex's own event stream.
 - **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/), the [OpenAI Agents SDK](adapters/openai-agents/) and [Google ADK](adapters/google-adk/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
+- **OpenTelemetry import:** an OTLP/HTTP endpoint (`/v1/traces`) and an OTLP file reader turn production traces from OpenTelemetry SDKs, Collectors and OpenInference instrumentations into the same live view, graphs included.
 - **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
 - **Multi-session support:** track several agent sessions at once, each in its own tab.
@@ -178,6 +179,48 @@ export AGENT_FLOW_TOKEN=...
 
 Call `flush()` to wait for delivery (it also runs at exit). The shared implementation is [adapters/_shared/agent_flow_sink.py](adapters/_shared/agent_flow_sink.py). Each adapter carries a copy, kept identical by `python adapters/sync_sink.py`. Persistent storage and search aren't part of the relay; for production traffic, keep a real observability backend as your system of record.
 
+## From OpenTelemetry traces
+
+If your agents already emit OpenTelemetry traces, Agent Flow can draw them without an adapter. The relay is an OTLP/HTTP trace receiver (protobuf or JSON, plain or gzip), and the app can also read OTLP JSON files.
+
+Point an OpenTelemetry SDK straight at the app (it speaks OTLP over HTTP, not gRPC):
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:3001/v1/traces
+```
+
+Or have your Collector send a copy of its traces alongside your observability backend:
+
+```yaml
+exporters:
+  otlphttp/agentflow:
+    traces_endpoint: http://agent-flow.internal:3101/v1/traces
+    headers: { Authorization: "Bearer ${env:AGENT_FLOW_TOKEN}" }
+```
+
+Or open a file: an OTLP JSON export, or a Collector file exporter's output, which is followed as it grows:
+
+```bash
+node app/dist/app.js --otel-file traces.jsonl
+```
+
+`/v1/traces` has the same access rules as `/ingest`: loopback clients only, unless `--ingest-token` is set, and the `--ingest-host` listener serves it too. Spans arrive as they finish, children before parents, so a trace is held until its root span arrives (or, when the root belongs to an upstream service that doesn't export here, until it has been quiet for 15 seconds). It then replays in its own session tab at the pace it ran, with pauses shortened to 2 seconds.
+
+It understands both span vocabularies agent frameworks emit:
+
+- the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.operation.name`: `invoke_agent`, `chat`, `execute_tool`, …), as emitted by Strands Agents, Microsoft Agent Framework and Google ADK;
+- [OpenInference](https://github.com/Arize-ai/openinference) (`openinference.span.kind`), Arize Phoenix's instrumentations for LangChain/LangGraph, the OpenAI Agents SDK, CrewAI and others.
+
+Agents become agents, nested or tool-called agents become subagents, model calls add the model, thinking, replies and token counts, and tool calls show their arguments, results and errors. A span that orchestrates agents without calling a model itself (a Strands graph or swarm, an Agent Framework workflow, an ADK `SequentialAgent` / `ParallelAgent` / `LoopAgent`, a LangGraph graph, a chain of OpenAI handoffs) is drawn in the Graph panel. Its nodes are the children, and its edges are the order they ran in: a node follows the nodes that finished just before it started, which shows fan-out, merges and loops. When the framework records its declared graph, as Agent Framework's `workflow.build` span does, the branches that weren't taken and the conditions are drawn too.
+
+The adapters above see more than traces do (for example LangGraph's declared conditional edges, or CrewAI's delegation), so use them where you can install them. The importer is for traces you already collect. To convert a file into Agent Flow's JSONL format instead:
+
+```bash
+pnpm otel:import traces.json                  # list the traces
+pnpm otel:import traces.json --out runs/      # one <trace id>.jsonl per trace
+```
+
 ## JSONL event format
 
 To add another framework, write one JSON object per line:
@@ -278,7 +321,8 @@ Other scripts:
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
 | `pnpm run build:app` | Build the standalone app into `app/dist/` |
-| `pnpm test` | Relay, event log, graph layout and graph event tests |
+| `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout and graph event tests |
+| `pnpm otel:import <file>` | Convert OTLP JSON traces into Agent Flow JSONL event logs |
 
 Each adapter has its own tests, which run offline against fake models. The shared event sink has tests too (`pytest adapters/_shared/tests`), and `python adapters/sync_sink.py --check` verifies every adapter's copy of it:
 
@@ -294,7 +338,8 @@ Repository layout:
 | `extension/` | VS Code extension, Claude Code and Codex watchers, event protocol |
 | `web/` | The visualizer UI (canvas, panels, Graph panel and layout) |
 | `app/` | Standalone `agent-flow-app` server |
-| `scripts/` | Event relay, event log watcher, setup, telemetry, and their tests |
+| `scripts/` | Event relay, event log watcher, HTTP ingest, setup, telemetry, and their tests |
+| `scripts/otel/` | OpenTelemetry import: OTLP decoding, span-to-event conversion, the `/v1/traces` receiver, and fixtures recorded from the adapters' demos |
 | `adapters/` | Framework adapters for LangGraph, Strands Agents, Microsoft Agent Framework, CrewAI, the OpenAI Agents SDK and Google ADK |
 
 ## Star History
