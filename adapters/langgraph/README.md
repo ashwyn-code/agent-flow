@@ -2,6 +2,8 @@
 
 Streams LangGraph runs into the Agent Flow visualizer. It's a LangChain callback handler that writes Agent Flow's JSONL event format. Agent Flow replays that file and keeps following it as new events arrive, in the standalone web app or in VS Code.
 
+![The deep orchestration demo in Agent Flow: three parallel research teams, a writer loop, and drilling into nested subgraphs](../../docs/media/langgraph.gif)
+
 ## Install
 
 ```bash

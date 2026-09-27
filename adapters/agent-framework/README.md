@@ -2,6 +2,8 @@
 
 Streams [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) runs into the Agent Flow visualizer. It writes Agent Flow's JSONL event format, and Agent Flow replays that file and keeps following it as new events arrive.
 
+![The incident-response demo in Agent Flow: switch-case triage, parallel analysts, a remediation loop and a nested workflow](../../docs/media/agent-framework.gif)
+
 It covers agents (streaming and non-streaming), agents as tools, and workflows, including switch-case routing, fan-out and fan-in, conditional loops and nested workflows.
 
 ## Install

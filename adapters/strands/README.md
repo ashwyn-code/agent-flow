@@ -2,6 +2,8 @@
 
 Streams [Strands Agents](https://strandsagents.com) runs into the Agent Flow visualizer. It's a Strands `HookProvider` that writes Agent Flow's JSONL event format, and Agent Flow replays that file and keeps following it as new events arrive.
 
+![The Strands demo in Agent Flow: three parallel branches, a failed tool call, a nested graph and a Swarm handoff loop](../../docs/media/strands.gif)
+
 It covers single agents, agents as tools, `Graph` (including parallel batches, conditional edges, loops and nested graphs) and `Swarm`.
 
 ## Install

@@ -16,6 +16,12 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
 - **See where time is spent:** spot slow tool calls, unnecessary branching or redundant work at a glance.
 - **Learn by watching:** build intuition for writing better prompts by watching how an agent interprets and carries them out.
 
+## See it in action
+
+![Agents spawning, tool calls and messages on the canvas, then the timeline and session transcript panels](docs/media/canvas.gif)
+
+*A LangGraph supervisor handing work to two agents: tool calls fan out from each agent, messages appear as bubbles, and the Timeline (`T`) and transcript (`C`) panels replay the run.*
+
 ## Features
 
 - **Live agent visualization:** agent execution as an interactive node graph, with real-time tool calls, branching and return flows.
@@ -104,7 +110,15 @@ The demos:
 | Agent Framework | `examples/incident_response_demo.py` | 12 agents: switch-case triage, 3 parallel analysts, a nested remediation workflow that loops back |
 | CrewAI | `examples/launch_flow_demo.py` | 14 agents: parallel Flow branches, async tasks, a hierarchical crew with delegation, a router loop |
 
-Each adapter's README has the full mapping and its caveats.
+Each adapter's README has the full mapping and its caveats. Here's each demo running live in the Graph panel:
+
+| LangGraph | Strands Agents |
+|---|---|
+| ![LangGraph demo: three parallel research teams, a writer loop, drilling into nested subgraphs](docs/media/langgraph.gif) | ![Strands demo: three parallel branches, a failed tool call, a nested graph and a Swarm handoff loop](docs/media/strands.gif) |
+| Three research teams in parallel, a merge and two review loops, then drilling four levels down into the writer's subgraphs. | A Graph with three parallel branches (one tool call fails and is retried), then the nested graph and the Swarm's handoffs. |
+| **Microsoft Agent Framework** | **CrewAI** |
+| ![Agent Framework demo: switch-case triage, parallel analysts, a remediation loop and a nested workflow](docs/media/agent-framework.gif) | ![CrewAI demo: a Flow with parallel branches and a router loop, drilling into the crews its methods ran](docs/media/crewai.gif) |
+| Switch-case triage (the low-severity branch stays dim), three parallel analysts, and a remediation sub-workflow that loops back once. | A Flow with parallel branches, an `and_` merge and a router loop, then drilling from Flow methods into the crews they ran. |
 
 ### Viewing an adapter's log
 
@@ -119,7 +133,7 @@ Agent Flow replays the file and then follows it as events are added, so you can 
 
 ## Graph panel
 
-Press **Graph** in the top bar (it appears when a session has graph data) or `N` to see a workflow as the graph it really is, next to the agent tree:
+Press **Graph** in the top bar (it appears when a session has graph data) or `N` to see a workflow as the graph it really is, next to the agent tree. The [recordings above](#visualize-agents-built-with-other-frameworks) show it in action.
 
 - **Layout:** nodes run top to bottom from START to END. Loops are drawn as arcs on the side of the node they leave from. Parallel branches sit side by side above the node where they merge.
 - **Routes:** routes taken are bright. Routes declared but not taken are dim. Dashed edges are conditional: routers, switch-cases, conditional edges.

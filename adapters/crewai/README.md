@@ -2,6 +2,8 @@
 
 Streams [CrewAI](https://www.crewai.com) crews and flows into the Agent Flow visualizer. It listens on CrewAI's event bus and writes Agent Flow's JSONL event format, and Agent Flow replays that file and keeps following it as new events arrive.
 
+![The launch Flow demo in Agent Flow: parallel branches, a router loop, and drilling into the crews the Flow ran](../../docs/media/crewai.gif)
+
 It covers crews (sequential, parallel async tasks, task `context`, hierarchical managers and delegation), flows (`@start`, `@listen` with `and_` / `or_`, and `@router` loops), crews and agents run from Flow methods, and direct `agent.kickoff()` calls.
 
 ## Install
