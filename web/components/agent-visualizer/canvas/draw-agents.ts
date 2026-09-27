@@ -4,6 +4,7 @@ import {
   AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY,
 } from '@/lib/canvas-constants'
 import { alphaHex, formatTokens } from '@/lib/utils'
+import { modelColor } from '@/lib/model-colors'
 import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
 import { getAgentGlowSprite } from './render-cache'
 
@@ -56,12 +57,28 @@ export function drawAgentBrand(
   else drawClaudeSpark(ctx, cx, cy, r, color)
 }
 
+/** Context fill color: calm, then amber near the limit, red at it. */
+export function contextUsageColor(usage: number): string {
+  return usage > CONTEXT_RING.criticalThreshold ? COLORS.error
+    : usage > CONTEXT_RING.warningThreshold ? COLORS.tool
+    : COLORS.holoBase
+}
+
+/** Context segments, plus the part no breakdown accounts for (most framework
+ *  adapters report a total only), drawn in the usage color. */
+function filledSegments(agent: Agent): { value: number; color: string }[] {
+  const segments: { value: number; color: string }[] = contextSegments(agent.contextBreakdown)
+  const classified = segments.reduce((sum, seg) => sum + Math.max(0, seg.value), 0)
+  const rest = agent.tokensUsed - classified
+  if (rest > 0) segments.push({ value: rest, color: contextUsageColor(agent.tokensUsed / agent.tokensMax) })
+  return segments
+}
+
 export function drawContextComposition(
   ctx: CanvasRenderingContext2D,
   agent: Agent,
   radius: number,
 ) {
-  const bd = agent.contextBreakdown
   const total = agent.tokensUsed
   if (total <= 0) return
 
@@ -83,7 +100,7 @@ export function drawContextComposition(
   ctx.fillText(`${formatTokens(total)} / ${formatTokens(agent.tokensMax)} tokens`, agent.x, barY + barHeight + CONTEXT_BAR.labelPadding)
 
   // Segments
-  const segments = contextSegments(bd)
+  const segments = filledSegments(agent)
 
   let x = barX
   const maxWidth = barWidth * (total / agent.tokensMax)
@@ -113,13 +130,13 @@ export function drawContextRing(
   radius: number,
   time: number,
 ) {
-  const bd = agent.contextBreakdown
   const total = agent.tokensUsed
   if (total <= 0) return
 
-  const usage = total / agent.tokensMax
-  const ringR = radius + CONTEXT_RING.ringOffset
-  const ringW = CONTEXT_RING.ringWidth
+  const usage = Math.min(1, total / agent.tokensMax)
+  // Subagents get a slimmer ring, closer in
+  const ringR = radius + (agent.isMain ? CONTEXT_RING.ringOffset : CONTEXT_RING.ringOffset * 0.6)
+  const ringW = agent.isMain ? CONTEXT_RING.ringWidth : CONTEXT_RING.ringWidth * 0.6
   const startAngle = -Math.PI / 2
 
   // Background ring (empty capacity)
@@ -130,12 +147,13 @@ export function drawContextRing(
   ctx.stroke()
 
   // Filled segments
-  const segments = contextSegments(bd)
+  const segments = filledSegments(agent)
 
   let currentAngle = startAngle
+  const endAngle = startAngle + Math.PI * 2
   for (const seg of segments) {
-    if (seg.value <= 0) continue
-    const sweep = (seg.value / agent.tokensMax) * Math.PI * 2
+    if (seg.value <= 0 || currentAngle >= endAngle) continue
+    const sweep = Math.min((seg.value / agent.tokensMax) * Math.PI * 2, endAngle - currentAngle)
     ctx.beginPath()
     ctx.arc(agent.x, agent.y, ringR, currentAngle, currentAngle + sweep)
     ctx.strokeStyle = seg.color
@@ -186,16 +204,17 @@ function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number)
 }
 
 function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isSelected: boolean, isWaiting: boolean) {
+  const tint = modelColor(agent.model)
   const glowR = r + AGENT_DRAW.glowPadding
   const glowAlpha = isHovered || isSelected ? 0.35 : isWaiting ? 0.3 : agent.state === 'thinking' ? 0.2 : 0.1
   // Pre-rendered glow sprite instead of per-frame gradient creation
   const sprite = getAgentGlowSprite(color, Math.round(r * 0.5), Math.ceil(glowR), alphaHex(glowAlpha))
   ctx.drawImage(sprite, agent.x - Math.ceil(glowR), agent.y - Math.ceil(glowR))
 
-  // Ambient outer hex ring
+  // Ambient outer hex ring, in the model's color when it's known
   drawHexagon(ctx, agent.x, agent.y, r + AGENT_DRAW.outerRingOffset)
-  ctx.strokeStyle = color + '25'
-  ctx.lineWidth = 1
+  ctx.strokeStyle = tint ? tint + '90' : color + '25'
+  ctx.lineWidth = tint ? 1.5 : 1
   ctx.stroke()
 
   // Inner hex fill
@@ -339,6 +358,8 @@ export function drawAgents(
   hoveredAgentId: string | null,
   showStats: boolean,
   time: number,
+  /** Dim agents on other models (hovering the model legend) */
+  highlightModel?: string | null,
 ) {
   for (const [id, agent] of agents) {
     const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
@@ -357,7 +378,7 @@ export function drawAgents(
     const r = radius * breathe * agent.scale
 
     ctx.save()
-    ctx.globalAlpha = agent.opacity
+    ctx.globalAlpha = agent.opacity * (highlightModel && agent.model !== highlightModel ? 0.2 : 1)
 
     drawDepthShadow(ctx, agent, r)
     drawAgentGlow(ctx, agent, r, color, isHovered, isSelected, isWaiting)
@@ -375,11 +396,9 @@ export function drawAgents(
 
     drawAgentLabel(ctx, agent, r, isHovered)
 
-    // Context composition — ring for main agent, bar for sub-agents
+    // Context gauge: a ring around every agent, plus the breakdown bar
     if (agent.state !== 'complete' || agent.opacity > 0.5) {
-      if (agent.isMain) {
-        drawContextRing(ctx, agent, r, time)
-      }
+      drawContextRing(ctx, agent, r, time)
       drawContextComposition(ctx, agent, r)
     }
 

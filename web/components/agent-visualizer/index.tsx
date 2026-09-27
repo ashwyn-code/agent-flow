@@ -24,6 +24,7 @@ import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar, type ExclusivePanel } from "./top-bar"
 import { GraphPanel } from "./graph-panel"
+import { ModelLegend } from "./model-legend"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -72,6 +73,7 @@ export function AgentVisualizer() {
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
+  const [highlightModel, setHighlightModel] = useState<string | null>(null)
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: ExclusivePanel) => {
@@ -292,6 +294,16 @@ export function AgentVisualizer() {
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
         showCostOverlay={showCostOverlay}
+        highlightModel={highlightModel}
+      />
+
+      {/* Models in use, with running cost (bottom-left) */}
+      <ModelLegend
+        visible={!showTimeline}
+        events={eventLog}
+        currentTime={currentTime}
+        highlightModel={highlightModel}
+        onHighlight={setHighlightModel}
       />
 
       {/* Message feed panel (top-left) */}

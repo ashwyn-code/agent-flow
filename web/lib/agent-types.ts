@@ -68,6 +68,10 @@ export interface ToolCallNode {
   tokenCost?: number    // how many tokens this result consumed
   inputData?: Record<string, unknown>  // rich tool input (diffs, todos, commands)
   errorMessage?: string // error description when state === 'error'
+  /** The failed call this one retries (same agent and tool) */
+  retryOf?: string
+  /** 1 for a first attempt, 2 for the first retry, ... */
+  attempt?: number
   x: number
   y: number
   startTime: number
@@ -292,6 +296,8 @@ export const FX = {
   spawnDuration: 0.8,
   completeDuration: 1.0,
   shatterDuration: 0.8,
+  compactDuration: 1.6,
+  errorRippleDuration: 1.1,
   shatterCount: 12,
   shatterSpeed: { min: 30, range: 60 },
   shatterSize: { min: 1, range: 2 },

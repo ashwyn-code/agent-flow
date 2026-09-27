@@ -32,6 +32,8 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
 - **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/), the [OpenAI Agents SDK](adapters/openai-agents/) and [Google ADK](adapters/google-adk/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
 - **OpenTelemetry import:** an OTLP/HTTP endpoint (`/v1/traces`) and an OTLP file reader turn production traces from OpenTelemetry SDKs, Collectors and OpenInference instrumentations into the same live view, graphs included.
 - **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors.
+- **Canvas signals:** a context gauge ring on every agent that turns amber and red near the limit and flashes when context is compacted; red ripples on failures; retry arcs with attempt badges; guardrail checks as shields that pass or trip.
+- **Models and cost:** each agent's outer ring is tinted by its model, and the Models legend totals agents, tokens and estimated cost per model for the whole run. Hover a model to spotlight its agents.
 - **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
 - **Multi-session support:** track several agent sessions at once, each in its own tab.
@@ -157,6 +159,13 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, indented under the agent that started it, with each tool call as a bar and parallel calls stacked on their own rows. Hover a bar for its duration and details, and click one to select that agent.
 
 **Critical path** (on by default) highlights the chain of work that set the run's total duration. Starting from the end of the main agent, it steps back through whichever tool call or subagent finished last, into subagents (including agents called as tools), and counts the gaps as the agent's own time: model calls, thinking and waiting. The header shows how that time splits between tools and agents, and the footer lists the largest items on the path. Work that isn't on the path is dimmed: speeding it up wouldn't make the run finish sooner.
+
+## Canvas signals
+
+- **Context gauge:** a ring around every agent fills as its context window does. It stays blue, turns amber above 80% and red above 90%, and shows the percentage past 70%. When context shrinks by 30% or more from a sizeable size (compaction or truncation), the ring collapses inward with a `context 168k → 52k` label.
+- **Failures:** a failed tool call sends red ripples out from its card and its agent. A call to the same tool that follows a failure is drawn as a retry: a dashed arc from the failed card, labelled with the attempt, and a `↻N` badge on the card.
+- **Guardrails:** tool calls named `guardrail: …` (as the OpenAI Agents adapter and the OpenTelemetry import report them) are drawn with a shield: a check when the check passed, a cross when it tripped.
+- **Models:** each agent's outer ring is tinted by its model (Opus purple, Sonnet blue, Haiku teal, GPT green, Gemini amber; other models get a stable color of their own). The **Models** legend in the bottom-left lists the models in use with their agents, tokens and estimated cost. These are totals for the whole run, including agents that have finished, and use each agent's largest context. Hover a model to dim every other agent.
 
 ## Beyond your laptop: HTTP, redaction and sampling
 

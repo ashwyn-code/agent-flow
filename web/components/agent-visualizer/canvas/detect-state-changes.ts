@@ -1,7 +1,14 @@
 import type { Agent, ToolCallNode } from '@/lib/agent-types'
-import { FX } from '@/lib/agent-types'
+import { FX, NODE } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
+import { CONTEXT_RING } from '@/lib/canvas-constants'
+import { formatTokens } from '@/lib/utils'
 import type { VisualEffect } from './draw-effects'
+
+/** Context that shrinks by at least this share (from a meaningful size) was
+ *  compacted or truncated. */
+const COMPACTION_DROP = 0.3
+const COMPACTION_MIN_USAGE = 0.15
 
 /** A semantic state transition detected between frames. */
 export type StateTransition =
@@ -10,6 +17,7 @@ export type StateTransition =
   | { kind: 'tool_start' }
   | { kind: 'tool_complete' }
   | { kind: 'tool_error' }
+  | { kind: 'context_compacted' }
 
 /**
  * Compare previous and current agent/tool states and return both visual effects
@@ -26,20 +34,38 @@ export function detectStateChanges(
   toolCalls: Map<string, ToolCallNode>,
   prevAgentStates: Map<string, string>,
   prevToolStates: Map<string, string>,
+  prevTokens: Map<string, number> = new Map(),
 ): {
   effects: VisualEffect[]
   transitions: StateTransition[]
   newAgentStates: Map<string, string>
   newToolStates: Map<string, string>
+  newTokens: Map<string, number>
 } {
   const effects: VisualEffect[] = []
   const transitions: StateTransition[] = []
   const newAgentStates = new Map<string, string>()
   const newToolStates = new Map<string, string>()
+  const newTokens = new Map<string, number>()
 
   for (const [id, agent] of agents) {
     newAgentStates.set(id, agent.state)
+    newTokens.set(id, agent.tokensUsed)
     const oldState = prevAgentStates.get(id)
+
+    // Context compacted: tokens fell sharply from a sizeable context
+    const before = prevTokens.get(id)
+    if (before !== undefined && agent.tokensMax > 0 && before / agent.tokensMax >= COMPACTION_MIN_USAGE
+      && agent.tokensUsed < before * (1 - COMPACTION_DROP)) {
+      transitions.push({ kind: 'context_compacted' })
+      const r = agent.isMain ? NODE.radiusMain : NODE.radiusSub
+      effects.push({
+        type: 'compact', x: agent.x, y: agent.y,
+        color: COLORS.contextReasoning, age: 0, duration: FX.compactDuration,
+        radius: r + CONTEXT_RING.ringOffset + 4,
+        label: `context ${formatTokens(before)} → ${formatTokens(agent.tokensUsed)}`,
+      })
+    }
 
     // Spawn: new agent (wasn't in prev)
     if (!oldState) {
@@ -89,11 +115,19 @@ export function detectStateChanges(
       })
     }
 
-    // Tool errored
+    // Tool errored: shockwaves at the card and at its agent
     if (oldState === 'running' && tool.state === 'error') {
       transitions.push({ kind: 'tool_error' })
+      effects.push({ type: 'error_ripple', x: tool.x, y: tool.y, color: COLORS.error, age: 0, duration: FX.errorRippleDuration, radius: 16 })
+      const agent = agents.get(tool.agentId)
+      if (agent) {
+        effects.push({
+          type: 'error_ripple', x: agent.x, y: agent.y, color: COLORS.error, age: 0, duration: FX.errorRippleDuration,
+          radius: agent.isMain ? NODE.radiusMain : NODE.radiusSub,
+        })
+      }
     }
   }
 
-  return { effects, transitions, newAgentStates, newToolStates }
+  return { effects, transitions, newAgentStates, newToolStates, newTokens }
 }

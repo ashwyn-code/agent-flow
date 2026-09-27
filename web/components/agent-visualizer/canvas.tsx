@@ -41,12 +41,14 @@ interface CanvasProps {
   onDiscoveryClick?: (discoveryId: string | null) => void
   selectedDiscoveryId?: string | null
   showCostOverlay?: boolean
+  /** Dim agents on other models (hovering the model legend) */
+  highlightModel?: string | null
 }
 
 export function AgentCanvas({
   simulationRef,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
-  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay,
+  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay, highlightModel,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -63,6 +65,7 @@ export function AgentCanvas({
   const effectsRef = useRef<VisualEffect[]>([])
   const prevAgentStatesRef = useRef<Map<string, string>>(new Map())
   const prevToolStatesRef = useRef<Map<string, string>>(new Map())
+  const prevTokensRef = useRef<Map<string, number>>(new Map())
 
   // Rate-limited error logging for the draw loop (avoid flooding console)
   const lastDrawErrorRef = useRef(0)
@@ -93,7 +96,7 @@ export function AgentCanvas({
     agents: sim.agents, toolCalls: sim.toolCalls,
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-    showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+    showCostOverlay, selectedToolCallId, selectedDiscoveryId, highlightModel,
     simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
     onToolCallClick, onDiscoveryClick,
@@ -152,13 +155,14 @@ export function AgentCanvas({
 
   const detectStateChanges = useCallback(() => {
     const { agents, toolCalls } = drawPropsRef.current
-    const { effects, newAgentStates, newToolStates } = detectStateChangesPure(
+    const { effects, newAgentStates, newToolStates, newTokens } = detectStateChangesPure(
       agents, toolCalls,
-      prevAgentStatesRef.current, prevToolStatesRef.current,
+      prevAgentStatesRef.current, prevToolStatesRef.current, prevTokensRef.current,
     )
     effectsRef.current.push(...effects)
     prevAgentStatesRef.current = newAgentStates
     prevToolStatesRef.current = newToolStates
+    prevTokensRef.current = newTokens
   }, [])
 
   // ─── Main draw loop ────────────────────────────────────────────────────
@@ -191,7 +195,7 @@ export function AgentCanvas({
       const {
         agents, toolCalls, particles, edges, discoveries,
         selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-        showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+        showCostOverlay, selectedToolCallId, selectedDiscoveryId, highlightModel,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
         isDragging,
       } = drawPropsRef.current
@@ -269,7 +273,7 @@ export function AgentCanvas({
       drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
-      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
+      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, highlightModel)
       drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
       drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
