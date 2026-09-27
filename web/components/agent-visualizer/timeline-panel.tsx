@@ -1,15 +1,25 @@
 'use client'
 
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
-import { Z, type SimulationEvent } from '@/lib/agent-types'
-import { COLORS } from '@/lib/colors'
+import { Z, type Agent, type SimulationEvent } from '@/lib/agent-types'
+import { COLORS, contextSegments } from '@/lib/colors'
+import { modelColor } from '@/lib/model-colors'
 import { analyzeRun, type RunAnalysis } from '@/lib/run-analysis'
+import { formatTokens } from '@/lib/utils'
+import type { ConversationMessage } from '@/hooks/simulation/types'
 import { PanelHeader, SlidingPanel } from './shared-ui'
 
 interface TimelinePanelProps {
   visible: boolean
   events: readonly SimulationEvent[]
   currentTime: number
+  /** End of the run so far: the timeline keeps its full width while you scrub back */
+  maxTime?: number
+  /** Agents and conversations as they stood at currentTime, for the moment strip */
+  agents?: Map<string, Agent>
+  conversations?: Map<string, ConversationMessage[]>
+  /** Seek to a time (dragging the ruler or the playhead) */
+  onSeek?: (time: number) => void
   onAgentClick?: (agentId: string) => void
   onClose: () => void
 }
@@ -24,6 +34,16 @@ const INDENT = 8
 const FONT = '9px monospace'
 
 const laneHeight = (rows: number) => rows * SUB_ROW + LANE_PAD * 2
+
+/** x ↔ time mapping shared by drawing and dragging */
+function timeScale(a: RunAnalysis, width: number) {
+  const barWidth = width - LABEL_WIDTH - 8
+  const span = Math.max(a.end - a.start, 0.001)
+  return {
+    x: (t: number) => LABEL_WIDTH + ((t - a.start) / span) * barWidth,
+    t: (x: number) => a.start + Math.min(1, Math.max(0, (x - LABEL_WIDTH) / barWidth)) * span,
+  }
+}
 
 const LEGEND_ITEMS = [
   { color: COLORS.holoBase, label: 'Agent running' },
@@ -191,12 +211,25 @@ function drawSwimlanes(
     ctx.globalAlpha = 1
   }
 
-  // Playhead
-  const px = xOf(Math.min(currentTime, a.end))
+  // What hasn't happened yet at the playhead is dimmed
+  const px = xOf(Math.min(Math.max(currentTime, t0), a.end))
+  if (px < LABEL_WIDTH + barWidth - 1) {
+    ctx.fillStyle = COLORS.void
+    ctx.globalAlpha = 0.55
+    ctx.fillRect(px, HEADER_HEIGHT, LABEL_WIDTH + barWidth - px, height - HEADER_HEIGHT)
+  }
+
+  // Playhead, with a handle on the ruler to drag
   ctx.fillStyle = COLORS.holoHot
-  ctx.globalAlpha = 0.45
-  ctx.fillRect(px, HEADER_HEIGHT, 1, height - HEADER_HEIGHT)
+  ctx.globalAlpha = 0.7
+  ctx.fillRect(px, HEADER_HEIGHT - 4, 1, height - HEADER_HEIGHT + 4)
   ctx.globalAlpha = 1
+  ctx.beginPath()
+  ctx.moveTo(px - 4, HEADER_HEIGHT - 9)
+  ctx.lineTo(px + 4, HEADER_HEIGHT - 9)
+  ctx.lineTo(px, HEADER_HEIGHT - 3)
+  ctx.closePath()
+  ctx.fill()
 
   ctx.restore()
   return hits
@@ -204,13 +237,56 @@ function drawSwimlanes(
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function TimelinePanel({ visible, events, currentTime, onAgentClick, onClose }: TimelinePanelProps) {
+export function TimelinePanel({ visible, events, currentTime, maxTime, agents, conversations, onSeek, onAgentClick, onClose }: TimelinePanelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hitsRef = useRef<HitRect[]>([])
   const [showCritical, setShowCritical] = useState(true)
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null)
+  const [dragging, setDragging] = useState(false)
 
-  const analysis = useMemo(() => (visible ? analyzeRun(events, currentTime) : null), [visible, events, currentTime])
+  // Lay out the whole run so far, so scrubbing back keeps the full width. It
+  // ends at the last event (the live clock keeps ticking after a run ends),
+  // or at the clock while agents are still running.
+  const lastEvent = events.length ? events[events.length - 1].time : 0
+  const live = maxTime === undefined || currentTime >= maxTime - 1e-6
+  const running = agents ? [...agents.values()].some(a => a.state !== 'complete') : true
+  const horizon = live && running ? Math.max(currentTime, lastEvent) : lastEvent
+  const analysis = useMemo(() => (visible ? analyzeRun(events, horizon) : null), [visible, events, horizon])
+
+  // Dragging the ruler or the playhead seeks, at most once per frame
+  const pendingSeek = useRef<number | null>(null)
+  const seekFrame = useRef<number | null>(null)
+  const seekTo = useCallback((clientX: number) => {
+    const canvas = canvasRef.current
+    if (!canvas || !analysis || !onSeek) return
+    const x = clientX - canvas.getBoundingClientRect().left
+    pendingSeek.current = timeScale(analysis, canvas.clientWidth).t(x)
+    if (seekFrame.current !== null) return
+    seekFrame.current = requestAnimationFrame(() => {
+      seekFrame.current = null
+      if (pendingSeek.current !== null) onSeek(pendingSeek.current)
+    })
+  }, [analysis, onSeek])
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: MouseEvent) => seekTo(e.clientX)
+    const up = () => setDragging(false)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+  }, [dragging, seekTo])
+  useEffect(() => () => { if (seekFrame.current !== null) cancelAnimationFrame(seekFrame.current) }, [])
+
+  /** On the ruler, or on the playhead line: a place to grab for scrubbing */
+  const onScrubHandle = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!analysis || !onSeek) return false
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    if (x < LABEL_WIDTH) return false
+    const px = timeScale(analysis, e.currentTarget.clientWidth).x(Math.min(currentTime, analysis.end))
+    return y <= HEADER_HEIGHT || Math.abs(x - px) <= 4
+  }, [analysis, onSeek, currentTime])
   const canvasHeight = HEADER_HEIGHT + (analysis?.lanes.reduce((sum, l) => sum + laneHeight(l.rows), 0) ?? 0) + 4
 
   useEffect(() => {
@@ -284,13 +360,28 @@ export function TimelinePanel({ visible, events, currentTime, onAgentClick, onCl
         <div className="overflow-auto relative" style={{ maxHeight: 320 }}>
           <canvas
             ref={canvasRef}
-            style={{ display: 'block', cursor: onAgentClick ? 'pointer' : 'default' }}
+            style={{ display: 'block', cursor: dragging ? 'ew-resize' : onAgentClick ? 'pointer' : 'default' }}
+            onMouseDown={e => {
+              if (!onScrubHandle(e)) return
+              e.preventDefault()
+              setDragging(true)
+              setHover(null)
+              seekTo(e.clientX)
+            }}
             onMouseMove={e => {
+              if (dragging) return
+              if (onScrubHandle(e)) {
+                e.currentTarget.style.cursor = 'ew-resize'
+                setHover(null)
+                return
+              }
+              e.currentTarget.style.cursor = onAgentClick ? 'pointer' : 'default'
               const found = hitAt(e)
               setHover(found ? { x: found.x, y: found.y, text: found.hit.text } : null)
             }}
             onMouseLeave={() => setHover(null)}
             onClick={e => {
+              if (onScrubHandle(e)) return
               const found = hitAt(e)
               if (found && onAgentClick) onAgentClick(found.hit.lane)
             }}
@@ -312,6 +403,8 @@ export function TimelinePanel({ visible, events, currentTime, onAgentClick, onCl
             </div>
           )}
         </div>
+
+        {agents && <MomentStrip analysis={analysis} agents={agents} conversations={conversations} time={currentTime} onAgentClick={onAgentClick} />}
 
         {showCritical && analysis.topCritical.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-1.5 text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
@@ -338,9 +431,92 @@ export function TimelinePanel({ visible, events, currentTime, onAgentClick, onCl
             </div>
           ))}
           <span className="flex-1" />
-          <span className="text-[9px] font-mono" style={{ color: COLORS.textFaint }}>hover for details · click to select</span>
+          <span className="text-[9px] font-mono" style={{ color: COLORS.textFaint }}>{onSeek ? 'drag the ruler to scrub · ' : ''}hover for details · click to select</span>
         </div>
       </div>
     </SlidingPanel>
+  )
+}
+
+// ─── The moment at the playhead ─────────────────────────────────────────────
+
+const MOMENT_ROWS = 8
+
+function activityOf(agent: Agent, messages: ConversationMessage[] | undefined): { text: string; color: string } {
+  if (agent.state === 'waiting_permission') return { text: 'waiting for permission', color: COLORS.waiting_permission }
+  if (agent.state === 'tool_calling' && agent.currentTool) return { text: `\u2699 ${agent.currentTool}`, color: COLORS.tool }
+  const last = messages && [...messages].reverse().find(m => m.type === 'thinking' || m.type === 'assistant' || m.type === 'tool_result' || m.type === 'user')
+  if (!last) return { text: agent.state, color: COLORS.textMuted }
+  const text = last.content.replace(/\s+/g, ' ').trim()
+  return {
+    text: last.type === 'thinking' ? `thinking: ${text}` : last.type === 'tool_result' ? `${last.toolName ?? 'tool'} returned: ${text.replace(/^<\s*/, '')}` : text,
+    color: last.type === 'thinking' ? COLORS.contextReasoning : COLORS.textDim,
+  }
+}
+
+/** Each agent running at the playhead: how full its context was, what it
+ *  held (when the runtime reports a breakdown), and what it was doing. */
+function MomentStrip({ analysis, agents, conversations, time, onAgentClick }: {
+  analysis: RunAnalysis
+  agents: Map<string, Agent>
+  conversations?: Map<string, ConversationMessage[]>
+  time: number
+  onAgentClick?: (agentId: string) => void
+}) {
+  const order = new Map(analysis.lanes.map((l, i) => [l.name, i]))
+  const depth = new Map(analysis.lanes.map(l => [l.name, l.depth]))
+  const live = [...agents.values()]
+    .filter(a => a.state !== 'complete')
+    // The main agent first (its name on screen can be the session label), then tree order
+    .sort((a, b) => Number(b.isMain) - Number(a.isMain) || (order.get(a.name) ?? 1e9) - (order.get(b.name) ?? 1e9))
+  if (!live.length) return null
+  const shown = live.slice(0, MOMENT_ROWS)
+  const elapsed = Math.max(0, time - analysis.start)
+
+  return (
+    <div className="px-3 pt-2 font-mono" style={{ borderTop: `1px solid ${COLORS.holoBorder06}`, marginTop: 4 }}>
+      <div className="text-[9px] mb-1" style={{ color: COLORS.textMuted }}>
+        At {formatSeconds(elapsed)}: {live.length} agent{live.length === 1 ? '' : 's'} running
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {shown.map(agent => {
+          const max = agent.tokensMax || 1
+          const usage = agent.tokensUsed / max
+          const segments = contextSegments(agent.contextBreakdown).filter(s => s.value > 0)
+          const classified = segments.reduce((sum, seg) => sum + seg.value, 0)
+          const rest = Math.max(0, agent.tokensUsed - classified)
+          const usageColor = usage > 0.9 ? COLORS.error : usage > 0.8 ? COLORS.tool : COLORS.holoBase
+          const activity = activityOf(agent, conversations?.get(agent.name))
+          const tint = modelColor(agent.model)
+          return (
+            <button
+              key={agent.id}
+              onClick={() => onAgentClick?.(agent.id)}
+              className="grid items-center gap-2 text-[9px] text-left rounded px-1 hover:bg-white/5"
+              style={{ gridTemplateColumns: `${LABEL_WIDTH - 12}px 120px 1fr` }}
+              title={`${agent.name}${agent.model ? ` · ${agent.model}` : ''}\ncontext: ${agent.tokensUsed.toLocaleString()} / ${max.toLocaleString()} tokens (${Math.round(usage * 100)}%)\n${activity.text}`}
+            >
+              <span className="truncate flex items-center gap-1" style={{ color: COLORS.textDim, paddingLeft: Math.min(depth.get(agent.name) ?? 0, 6) * INDENT }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint ?? COLORS.textMuted }} />
+                <span className="truncate">{agent.name}</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="relative flex-1 h-[5px] rounded-sm overflow-hidden" style={{ background: COLORS.holoBg05 }}>
+                  <span className="absolute inset-y-0 left-0 flex" style={{ width: `${Math.min(100, usage * 100)}%` }}>
+                    {segments.map((seg, i) => <span key={i} style={{ width: `${(seg.value / Math.max(agent.tokensUsed, 1)) * 100}%`, background: seg.color }} />)}
+                    {rest > 0 && <span style={{ width: `${(rest / Math.max(agent.tokensUsed, 1)) * 100}%`, background: usageColor }} />}
+                  </span>
+                </span>
+                <span style={{ color: usage > 0.8 ? usageColor : COLORS.textMuted, minWidth: 30, textAlign: 'right' }}>{formatTokens(agent.tokensUsed)}</span>
+              </span>
+              <span className="truncate" style={{ color: activity.color }}>{activity.text}</span>
+            </button>
+          )
+        })}
+        {live.length > shown.length && (
+          <span className="text-[9px] px-1" style={{ color: COLORS.textFaint }}>+{live.length - shown.length} more</span>
+        )}
+      </div>
+    </div>
   )
 }

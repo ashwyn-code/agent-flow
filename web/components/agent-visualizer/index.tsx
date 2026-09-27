@@ -182,6 +182,17 @@ export function AgentVisualizer() {
   }, [seekToTime, maxTimeReached, play])
   useEffect(() => () => { if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current) }, [])
 
+  /** Seek to a time. `fit` re-frames the camera; `review` holds there in review mode. */
+  const handleSeek = useCallback((time: number, fit = true, review = false) => {
+    seekingRef.current = true
+    pause()
+    if (review) setIsReviewing(true)
+    seekToTime(time)
+    if (fit) setZoomToFitTrigger(n => n + 1)
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
+  }, [pause, seekToTime, seekingRef])
+
   const handleRestart = useCallback(() => {
     setIsReviewing(false)
     restart(true)
@@ -377,14 +388,7 @@ export function AgentVisualizer() {
         onPlayPause={handlePlayPause}
         onRestart={handleRestart}
         onSpeedChange={setSpeed}
-        onSeek={(time) => {
-          seekingRef.current = true
-          pause()
-          seekToTime(time)
-          setZoomToFitTrigger(n => n + 1)
-          if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-          resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
-        }}
+        onSeek={(time) => handleSeek(time)}
         timelineEvents={timelineEvents}
         isReviewing={isReviewing}
         eventCount={timelineEvents.length}
@@ -430,6 +434,10 @@ export function AgentVisualizer() {
         visible={showTimeline}
         events={eventLog}
         currentTime={currentTime}
+        maxTime={maxTimeReached}
+        agents={agents}
+        conversations={conversations}
+        onSeek={(time) => handleSeek(time, false, true)}
         onAgentClick={selection.handleAgentClick}
         onClose={() => setShowTimeline(false)}
       />

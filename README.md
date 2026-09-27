@@ -34,7 +34,7 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
 - **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors, for one run or across every run of the graph (how often each route is taken, median and p95 node times, error rates). Compare diffs two runs: new and missing routes, and what got slower or costlier.
 - **Canvas signals:** a context gauge ring on every agent that turns amber and red near the limit and flashes when context is compacted; red ripples on failures; retry arcs with attempt badges; guardrail checks as shields that pass or trip.
 - **Models and cost:** each agent's outer ring is tinted by its model, and the Models legend totals agents, tokens and estimated cost per model for the whole run. Hover a model to spotlight its agents.
-- **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted.
+- **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted. Drag the ruler to scrub: everything replays to that moment, with each running agent's context and activity listed.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
 - **Multi-session support:** track several agent sessions at once, each in its own tab.
 - **Interactive canvas:** pan, zoom, and click agents and tool calls to inspect details.
@@ -161,6 +161,8 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, indented under the agent that started it, with each tool call as a bar and parallel calls stacked on their own rows. Hover a bar for its duration and details, and click one to select that agent.
 
 **Critical path** (on by default) highlights the chain of work that set the run's total duration. Starting from the end of the main agent, it steps back through whichever tool call or subagent finished last, into subagents (including agents called as tools), and counts the gaps as the agent's own time: model calls, thinking and waiting. The header shows how that time splits between tools and agents, and the footer lists the largest items on the path. Work that isn't on the path is dimmed: speeding it up wouldn't make the run finish sooner.
+
+**Scrubbing:** drag the ruler (or the playhead) to move through the run. The canvas, the Graph panel and its overlays replay to that moment, the timeline keeps the whole run in view with what hasn't happened yet dimmed, and the strip below lists every agent running at that moment: how full its context was (split by source when the runtime reports it), its model, and what it was doing, whether a tool call in progress or its latest thought or message.
 
 ## Canvas signals
 
