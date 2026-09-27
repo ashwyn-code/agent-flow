@@ -416,6 +416,8 @@ export function AgentVisualizer() {
         events={eventLog}
         sessionEvents={bridge.sessionEvents}
         sessionEventsVersion={bridge.sessionEventsVersion}
+        sessions={bridge.sessions}
+        currentSessionId={bridge.selectedSessionId}
         selectedAgentId={selection.selectedAgentId}
         currentTime={currentTime}
         isPlaying={isPlaying}
