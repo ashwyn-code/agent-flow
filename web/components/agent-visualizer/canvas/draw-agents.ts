@@ -5,6 +5,7 @@ import {
 } from '@/lib/canvas-constants'
 import { alphaHex, formatTokens } from '@/lib/utils'
 import { modelColor } from '@/lib/model-colors'
+import type { CollapsedSummary } from '@/lib/collapse'
 import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
 import { getAgentGlowSprite } from './render-cache'
 
@@ -191,6 +192,42 @@ export function drawContextRing(
   }
 }
 
+/** A collapsed subtree: hexes stacked behind the agent, and a +N badge that
+ *  pulses amber while something hidden is working and turns red on errors. */
+function drawCollapsedStack(ctx: CanvasRenderingContext2D, agent: Agent, r: number, summary: CollapsedSummary, time: number) {
+  const color = summary.error ? COLORS.error : summary.active ? COLORS.tool : COLORS.holoBase
+  ctx.save()
+  for (let i = 2; i >= 1; i--) {
+    drawHexagon(ctx, agent.x + i * 4, agent.y + i * 4, r)
+    ctx.fillStyle = COLORS.void
+    ctx.fill()
+    ctx.strokeStyle = color + (i === 2 ? '40' : '70')
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+  ctx.restore()
+  if (summary.hidden <= 0) return
+  const text = `+${summary.hidden}`
+  ctx.save()
+  ctx.font = '9px monospace'
+  const w = ctx.measureText(text).width + 10
+  const bx = agent.x + r * 0.55
+  const by = agent.y - r - 4
+  ctx.globalAlpha *= summary.active ? 0.75 + Math.sin(time * 4) * 0.25 : 1
+  ctx.fillStyle = COLORS.void
+  ctx.beginPath()
+  ctx.roundRect(bx, by - 7, w, 14, 7)
+  ctx.fill()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+  ctx.fillStyle = color
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, bx + w / 2, by + 0.5)
+  ctx.restore()
+}
+
 function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
   ctx.save()
   ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
@@ -360,6 +397,8 @@ export function drawAgents(
   time: number,
   /** Dim agents on other models (hovering the model legend) */
   highlightModel?: string | null,
+  /** Collapsed agents and what they hide */
+  collapsed?: Map<string, CollapsedSummary>,
 ) {
   for (const [id, agent] of agents) {
     const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
@@ -380,6 +419,8 @@ export function drawAgents(
     ctx.save()
     ctx.globalAlpha = agent.opacity * (highlightModel && agent.model !== highlightModel ? 0.2 : 1)
 
+    const folded = collapsed?.get(id)
+    if (folded) drawCollapsedStack(ctx, agent, r, folded, time)
     drawDepthShadow(ctx, agent, r)
     drawAgentGlow(ctx, agent, r, color, isHovered, isSelected, isWaiting)
     drawScanline(ctx, agent, r, color, isHovered, isWaiting, time)
