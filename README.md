@@ -1,6 +1,6 @@
 # Agent Flow
 
-Real-time visualization of AI agent orchestration. Watch your agents think, branch, and coordinate as they work: Claude Code and Codex sessions out of the box, and agents built with **LangGraph**, **Strands Agents**, **Microsoft Agent Framework**, **CrewAI** and the **OpenAI Agents SDK** through framework adapters. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA).
+Real-time visualization of AI agent orchestration. Watch your agents think, branch, and coordinate as they work: Claude Code and Codex sessions out of the box, and agents built with **LangGraph**, **Strands Agents**, **Microsoft Agent Framework**, **CrewAI**, the **OpenAI Agents SDK** and **Google ADK** through framework adapters. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA).
 
 ![Agent Flow visualization](https://res.cloudinary.com/dxlvclh9c/image/upload/v1773924941/screenshot_e7yox3.png)
 
@@ -29,7 +29,7 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
   - **Auto-detection:** sessions from both runtimes are detected at the same time and shown side by side. You can restrict to one with the `agentVisualizer.runtime` setting.
   - **Claude Code hooks:** a lightweight HTTP hook server receives events straight from Claude Code, with zero latency.
   - **Codex rollout tailing:** reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and shows tool calls, reasoning and authoritative token counts from Codex's own event stream.
-- **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/) and the [OpenAI Agents SDK](adapters/openai-agents/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
+- **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/), the [OpenAI Agents SDK](adapters/openai-agents/) and [Google ADK](adapters/google-adk/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
 - **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
 - **Multi-session support:** track several agent sessions at once, each in its own tab.
@@ -94,6 +94,7 @@ Each adapter is a small Python package in [`adapters/`](adapters/). It uses the 
 | [Microsoft Agent Framework](adapters/agent-framework/) | `adapters/agent-framework` (Python 3.10+) | `Agent(..., middleware=flow.middleware)` or `flow.instrument(workflow)` | Agents as tools (including concurrent runs), streaming, workflows with switch-case, fan-out and fan-in, loops and nested workflows |
 | [CrewAI](adapters/crewai/) | `adapters/crewai` (Python 3.10–3.13) | `listener = AgentFlowListener(path)`; nothing to attach | Crews (async tasks, `context`, hierarchical delegation), Flows (`and_` / `or_`, router loops), crews started from Flow methods |
 | [OpenAI Agents SDK](adapters/openai-agents/) | `adapters/openai-agents` (Python 3.9+) | `install(path)`; nothing to attach (a trace processor) | Handoffs as a routing graph, agents as tools (including concurrent runs), parallel tool calls and runs, guardrails, streaming |
+| [Google ADK](adapters/google-adk/) | `adapters/google-adk` (Python 3.10+) | `App(..., plugins=[AgentFlowPlugin(path)])` | `SequentialAgent` / `ParallelAgent` / `LoopAgent` as graphs (nested), sub-agents and `transfer_to_agent`, `AgentTool`, parallel tool calls |
 
 For example, with CrewAI:
 
@@ -111,6 +112,7 @@ The demos:
 | Agent Framework | `examples/incident_response_demo.py` | 12 agents: switch-case triage, 3 parallel analysts, a nested remediation workflow that loops back |
 | CrewAI | `examples/launch_flow_demo.py` | 14 agents: parallel Flow branches, async tasks, a hierarchical crew with delegation, a router loop |
 | OpenAI Agents SDK | `examples/support_desk_demo.py` | 7 agents: two parallel runs in one trace, a handoff chain with an unused route, agents as tools four levels deep, guardrails |
+| Google ADK | `examples/trip_planner_demo.py` | 12 agents: a Sequential pipeline with a Parallel research stage, a Loop that revises once, an `AgentTool`, a transfer to a sub-agent |
 
 Each adapter's README has the full mapping and its caveats. Here's each demo running live in the Graph panel:
 
@@ -121,9 +123,9 @@ Each adapter's README has the full mapping and its caveats. Here's each demo run
 | **Microsoft Agent Framework** | **CrewAI** |
 | ![Agent Framework demo: switch-case triage, parallel analysts, a remediation loop and a nested workflow](docs/media/agent-framework.gif) | ![CrewAI demo: a Flow with parallel branches and a router loop, drilling into the crews its methods ran](docs/media/crewai.gif) |
 | Switch-case triage (the low-severity branch stays dim), three parallel analysts, and a remediation sub-workflow that loops back once. | A Flow with parallel branches, an `and_` merge and a router loop, then drilling from Flow methods into the crews they ran. |
-| **OpenAI Agents SDK** | |
-| ![OpenAI Agents SDK demo: parallel runs, a handoff chain with unused routes, agents as tools and guardrails](docs/media/openai-agents.gif) | |
-| Two runs in parallel inside one trace, then handoffs Triage → Tech Support → Billing (the Sales route stays dim), with nested agents as tools, a retried tool call and guardrails. | |
+| **OpenAI Agents SDK** | **Google ADK** |
+| ![OpenAI Agents SDK demo: parallel runs, a handoff chain with unused routes, agents as tools and guardrails](docs/media/openai-agents.gif) | ![Google ADK demo: a sequential pipeline with a parallel stage and a revision loop](docs/media/google-adk.gif) |
+| Two runs in parallel inside one trace, then handoffs Triage → Tech Support → Billing (the Sales route stays dim), with nested agents as tools, a retried tool call and guardrails. | A `SequentialAgent` pipeline: a `ParallelAgent` research stage, then a `LoopAgent` that sends the itinerary back once, then a transfer to the booking sub-agent. |
 
 ### Viewing an adapter's log
 
@@ -144,7 +146,7 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 - **Routes:** routes taken are bright. Routes declared but not taken are dim. Dashed edges are conditional: routers, switch-cases, conditional edges.
 - **Counts:** `×N` on a node is how many times it ran, and `×N` on an edge is how many times that hop was taken.
 - **Live state:** the node running right now pulses amber, the hop just taken animates, and failed nodes are red.
-- **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
+- **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, a nested ADK workflow agent, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
 - **Replay:** scrubbing the timeline replays the graph state too.
 
 ## JSONL event format
@@ -223,7 +225,7 @@ Environment variables for the standalone app and dev relay:
 - [pnpm](https://pnpm.io/)
 - Claude Code CLI, for Claude Code sessions
 - For the VS Code extension: a VSCode-compatible IDE 1.85+ (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
-- For the framework adapters: Python 3.9+ for LangGraph and the OpenAI Agents SDK, 3.10+ for Strands and Agent Framework, and 3.10–3.13 for CrewAI
+- For the framework adapters: Python 3.9+ for LangGraph and the OpenAI Agents SDK, 3.10+ for Strands, Agent Framework and Google ADK, and 3.10–3.13 for CrewAI
 
 ## Development
 
@@ -264,7 +266,7 @@ Repository layout:
 | `web/` | The visualizer UI (canvas, panels, Graph panel and layout) |
 | `app/` | Standalone `agent-flow-app` server |
 | `scripts/` | Event relay, event log watcher, setup, telemetry, and their tests |
-| `adapters/` | Framework adapters for LangGraph, Strands Agents, Microsoft Agent Framework, CrewAI and the OpenAI Agents SDK |
+| `adapters/` | Framework adapters for LangGraph, Strands Agents, Microsoft Agent Framework, CrewAI, the OpenAI Agents SDK and Google ADK |
 
 ## Star History
 
