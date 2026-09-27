@@ -183,6 +183,8 @@ Call `flush()` to wait for delivery (it also runs at exit). The shared implement
 
 If your agents already emit OpenTelemetry traces, Agent Flow can draw them without an adapter. The relay is an OTLP/HTTP trace receiver (protobuf or JSON, plain or gzip), and the app can also read OTLP JSON files.
 
+![Microsoft Agent Framework's own OpenTelemetry spans, exported over OTLP and replayed: the declared workflow with its untaken conditional branch, parallel analysts, a remediation loop and a nested workflow](docs/media/otel.gif)
+
 Point an OpenTelemetry SDK straight at the app (it speaks OTLP over HTTP, not gRPC):
 
 ```bash
