@@ -34,6 +34,7 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
 - **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors, for one run or across every run of the graph (how often each route is taken, median and p95 node times, error rates). Compare diffs two runs: new and missing routes, and what got slower or costlier.
 - **Canvas signals:** a context gauge ring on every agent that turns amber and red near the limit and flashes when context is compacted; red ripples on failures; retry arcs with attempt badges; guardrail checks as shields that pass or trip.
 - **Large runs:** collapse subtrees into a single `+N` node, and find your way with a minimap.
+- **Replay export:** save a session as one self-contained HTML file that replays the run in any browser, for pull requests and incident write-ups.
 - **Models and cost:** each agent's outer ring is tinted by its model, and the Models legend totals agents, tokens and estimated cost per model for the whole run. Hover a model to spotlight its agents.
 - **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted. Drag the ruler to scrub: everything replays to that moment, with each running agent's context and activity listed.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
@@ -172,6 +173,20 @@ Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, 
 - **Guardrails:** tool calls named `guardrail: …` (as the OpenAI Agents adapter and the OpenTelemetry import report them) are drawn with a shield: a check when the check passed, a cross when it tripped.
 - **Large runs:** right-click an agent with subagents and choose **Collapse subtree** to fold everything under it into a stacked hex with a `+N` badge. The badge pulses amber while something hidden is working and turns red if something hidden failed. The canvas menu adds **Collapse all subtrees**, which leaves the main agent and its direct children, and **Expand all**. Selecting a hidden agent elsewhere (timeline, Graph panel, message feed) unfolds its way back. A **minimap** in the bottom-right appears once there are 6 or more agents on screen, or when something is off screen. It shows every agent (by model color, collapsed ones ringed) and the part in view; click or drag it to move there. The canvas menu switches it between auto, on and off.
 - **Models:** each agent's outer ring is tinted by its model (Opus purple, Sonnet blue, Haiku teal, GPT green, Gemini amber; other models get a stable color of their own). The **Models** legend in the bottom-left lists the models in use with their agents, tokens and estimated cost. These are totals for the whole run, including agents that have finished, and use each agent's largest context. Hover a model to dim every other agent.
+
+## Sharing a run
+
+Right-click the canvas and choose **Export replay (HTML)** to download the session as a single HTML file. It holds the visualizer and the session's events and needs nothing else: no relay, no install, no network. Opening it replays the run at its original pace, with pauses capped at 2 seconds. Afterwards the timeline, Graph panel, overlays and scrubbing all work as they do live, and **replay again** starts it over. **Export events (JSONL)** saves the raw events instead, in the [event format](#jsonl-event-format) below.
+
+To make one without the UI, for example as a CI artifact, build the app once and point the exporter at an event log or an OpenTelemetry export:
+
+```bash
+pnpm build:app
+pnpm replay:export run.jsonl -o run.html
+pnpm replay:export traces.otlp.json --trace 4bf9 -o incident.html
+```
+
+A replay contains everything the session showed, including prompts, tool arguments and results. Use the adapters' `content="metadata"` mode or `redact=` hook (see below) when that shouldn't leave your machine.
 
 ## Beyond your laptop: HTTP, redaction and sampling
 
@@ -348,6 +363,7 @@ Other scripts:
 | `pnpm run build:app` | Build the standalone app into `app/dist/` |
 | `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout, graph event, run analysis and UI logic tests |
 | `pnpm otel:import <file>` | Convert OTLP JSON traces into Agent Flow JSONL event logs |
+| `pnpm replay:export <file>` | Build a self-contained HTML replay from an event log or OTLP file (after `pnpm build:app`) |
 
 Each adapter has its own tests, which run offline against fake models. The shared event sink has tests too (`pytest adapters/_shared/tests`), and `python adapters/sync_sink.py --check` verifies every adapter's copy of it:
 

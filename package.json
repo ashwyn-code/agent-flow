@@ -13,6 +13,7 @@
     "build:all": "pnpm run build:webview && pnpm run build:extension",
     "build:app": "node app/build.js",
     "otel:import": "node --import tsx scripts/otel-import.ts",
+    "replay:export": "node --import tsx scripts/replay-export.ts",
     "test": "TSX_TSCONFIG_PATH=web/tsconfig.json node --import tsx --test \"scripts/**/*.test.ts\" \"app/src/**/*.test.ts\""
   },
   "devDependencies": {

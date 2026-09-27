@@ -26,6 +26,7 @@ import { TopBar, type ExclusivePanel } from "./top-bar"
 import { GraphPanel } from "./graph-panel"
 import { ModelLegend } from "./model-legend"
 import { agentsWithChildren, collapseAllTargets, collapsedAncestors } from "@/lib/collapse"
+import { buildReplayHtml, currentPageAssets, downloadFile, normalizeEvents, replayFileName } from "@/lib/replay-export"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -266,6 +267,28 @@ export function AgentVisualizer() {
     if (ancestors.length) setCollapsed(prev => new Set([...prev].filter(a => !ancestors.includes(a))))
   }, [selection.selectedAgentId, agents, collapsed])
 
+  // Export the session: a self-contained HTML replay, or its events as JSONL
+  const exportSession = useCallback(async (format: 'html' | 'jsonl') => {
+    const id = bridge.selectedSessionId
+    const events = (id && bridge.sessionEvents.get(id)) || eventLog
+    if (!events.length) {
+      window.alert('Nothing to export yet: this session has no events.')
+      return
+    }
+    const label = bridge.sessions.find(s => s.id === id)?.label ?? 'session'
+    if (format === 'jsonl') {
+      const lines = normalizeEvents(events).map(e => JSON.stringify(e)).join('\n') + '\n'
+      downloadFile(replayFileName(label, 'jsonl'), lines, 'application/x-ndjson')
+      return
+    }
+    try {
+      const { js, css } = await currentPageAssets()
+      downloadFile(replayFileName(label, 'html'), buildReplayHtml({ js, css, label, events, sessionId: id ?? undefined }), 'text/html')
+    } catch (err) {
+      window.alert(`Could not export a replay here: ${err instanceof Error ? err.message : String(err)}. You can export the events as JSONL and use \`pnpm replay:export\`.`)
+    }
+  }, [bridge.selectedSessionId, bridge.sessionEvents, bridge.sessions, eventLog])
+
   const minimapLabel = minimap === 'auto' ? 'auto' : minimap === 'on' ? 'on' : 'off'
   const nextMinimap = () => setMinimap(m => (m === 'auto' ? 'on' : m === 'on' ? 'off' : 'auto'))
 
@@ -282,6 +305,9 @@ export function AgentVisualizer() {
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
       { label: `🗺  Minimap: ${minimapLabel}`, onClick: nextMinimap },
+      { label: '', onClick: () => {}, separator: true },
+      { label: '⤓  Export replay (HTML)', onClick: () => { void exportSession('html') } },
+      { label: '⤓  Export events (JSONL)', onClick: () => { void exportSession('jsonl') } },
       { label: '', onClick: () => {}, separator: true },
       ...(collapseAllTargets(agents).length ? [{ label: '▸  Collapse all subtrees', onClick: () => { setCollapsed(new Set(collapseAllTargets(agents))); setZoomToFitTrigger(n => n + 1) } }] : []),
       ...(collapsed.size ? [{ label: '▾  Expand all', onClick: () => { setCollapsed(new Set()); setZoomToFitTrigger(n => n + 1) } }] : []),

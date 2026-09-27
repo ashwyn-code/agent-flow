@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { embeddedReplay, startEmbeddedReplay } from '@/lib/replay-export'
 import { vscodeBridge, type ConnectionStatus, type AgentEvent, type SessionInfo } from '@/lib/vscode-bridge'
 import { SimulationEvent } from '@/lib/agent-types'
 
@@ -86,6 +87,14 @@ export function useVSCodeBridge(): BridgeHookResult {
 
     // Skip in VS Code — extension handles events via postMessage
     if (bridge.isVSCode) return
+
+    // An exported replay carries its own events: play them, no relay
+    const replay = embeddedReplay()
+    if (replay) {
+      setConnectionStatus('connected')
+      setUseMockData(false)
+      return startEmbeddedReplay(replay)
+    }
 
     // Connect to relay in dev mode or standalone CLI mode
     const isStandalone = process.env.AGENT_FLOW_STANDALONE === '1'
