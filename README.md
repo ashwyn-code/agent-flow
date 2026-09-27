@@ -31,7 +31,8 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
   - **Codex rollout tailing:** reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and shows tool calls, reasoning and authoritative token counts from Codex's own event stream.
 - **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/), the [OpenAI Agents SDK](adapters/openai-agents/) and [Google ADK](adapters/google-adk/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
 - **OpenTelemetry import:** an OTLP/HTTP endpoint (`/v1/traces`) and an OTLP file reader turn production traces from OpenTelemetry SDKs, Collectors and OpenInference instrumentations into the same live view, graphs included.
-- **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them.
+- **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors.
+- **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted.
 - **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
 - **Multi-session support:** track several agent sessions at once, each in its own tab.
 - **Interactive canvas:** pan, zoom, and click agents and tool calls to inspect details.
@@ -148,7 +149,14 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 - **Counts:** `×N` on a node is how many times it ran, and `×N` on an edge is how many times that hop was taken.
 - **Live state:** the node running right now pulses amber, the hop just taken animates, and failed nodes are red.
 - **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, a nested ADK workflow agent, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
-- **Replay:** scrubbing the timeline replays the graph state too.
+- **Metric overlays:** the Runs / Time / Tokens / Cost / Errors switch colors each node by how much of that it accounts for, labels it with the value, and names the top node in the footer. Time is summed over a node's runs. Tokens, cost and errors include the subagents the node ran. Cost uses the same per-model estimate as the `$Cost` view.
+- **Replay:** scrubbing the timeline replays the graph state, and the overlays, too.
+
+## Execution timeline
+
+Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, indented under the agent that started it, with each tool call as a bar and parallel calls stacked on their own rows. Hover a bar for its duration and details, and click one to select that agent.
+
+**Critical path** (on by default) highlights the chain of work that set the run's total duration. Starting from the end of the main agent, it steps back through whichever tool call or subagent finished last, into subagents (including agents called as tools), and counts the gaps as the agent's own time: model calls, thinking and waiting. The header shows how that time splits between tools and agents, and the footer lists the largest items on the path. Work that isn't on the path is dimmed: speeding it up wouldn't make the run finish sooner.
 
 ## Beyond your laptop: HTTP, redaction and sampling
 
@@ -323,7 +331,7 @@ Other scripts:
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
 | `pnpm run build:app` | Build the standalone app into `app/dist/` |
-| `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout and graph event tests |
+| `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout, graph event and run analysis tests |
 | `pnpm otel:import <file>` | Convert OTLP JSON traces into Agent Flow JSONL event logs |
 
 Each adapter has its own tests, which run offline against fake models. The shared event sink has tests too (`pytest adapters/_shared/tests`), and `python adapters/sync_sink.py --check` verifies every adapter's copy of it:

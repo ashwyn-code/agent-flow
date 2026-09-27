@@ -452,6 +452,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     maxTimeReached: state.maxTimeReached,
     conversations: state.conversations,
     graphs: state.graphs,
+    eventLog: state.eventLog,
     play, pause, restart, setSpeed, seekToTime,
     updateAgentPosition,
     saveSnapshot, restoreSnapshot,

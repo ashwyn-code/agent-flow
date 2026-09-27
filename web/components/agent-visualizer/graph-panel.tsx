@@ -1,9 +1,12 @@
 'use client'
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Z, type Agent, type AgentGraph, type GraphNodeInfo } from '@/lib/agent-types'
+import { Z, type Agent, type AgentGraph, type GraphNodeInfo, type SimulationEvent } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { layoutGraph, type LayoutEdge, type LayoutNode } from '@/lib/graph-layout'
+import { analyzeRun, type NodeMetrics } from '@/lib/run-analysis'
+import { formatTokens } from '@/lib/utils'
+import { agentCost } from './canvas/draw-cost'
 import { PanelHeader, SlidingPanel, stopPropagationHandlers } from './shared-ui'
 
 /** How long (seconds) a just-taken hop keeps its flowing highlight */
@@ -11,10 +14,62 @@ const HOT_HOP_S = 1.5
 // Shrinks on narrow windows (e.g. a VS Code side column)
 const PANEL_W = 'min(380px, calc(100vw - 24px))'
 
+// ─── Metric overlays ─────────────────────────────────────────────────────────
+
+export type GraphOverlay = 'runs' | 'time' | 'tokens' | 'cost' | 'errors'
+
+const OVERLAYS: { id: GraphOverlay; label: string; color: string; title: string }[] = [
+  { id: 'runs', label: 'Runs', color: COLORS.holoBase, title: 'Which nodes ran, and how often' },
+  { id: 'time', label: 'Time', color: COLORS.tool_calling, title: 'Time spent in each node, summed over its runs' },
+  { id: 'tokens', label: 'Tokens', color: COLORS.contextReasoning, title: 'Context tokens used by the agents each node ran (including their subagents)' },
+  { id: 'cost', label: 'Cost', color: COLORS.complete, title: 'Estimated cost of the agents each node ran' },
+  { id: 'errors', label: 'Errors', color: COLORS.error, title: 'Failed tool calls and node errors' },
+]
+
+interface OverlayCell { value: number; text: string; heat: number; color: string }
+
+function metricValue(m: NodeMetrics, overlay: GraphOverlay): number {
+  switch (overlay) {
+    case 'time': return m.time
+    case 'tokens': return m.tokens
+    case 'cost': return m.cost
+    case 'errors': return m.errors
+    default: return m.runs
+  }
+}
+
+function formatMetric(value: number, overlay: GraphOverlay): string {
+  switch (overlay) {
+    case 'time': return value < 1 ? `${Math.round(value * 1000)}ms` : value < 60 ? `${value.toFixed(value < 10 ? 1 : 0)}s` : `${Math.floor(value / 60)}m${Math.round(value % 60)}s`
+    case 'tokens': return formatTokens(value)
+    case 'cost': return value < 0.01 ? `$${value.toFixed(3)}` : `$${value.toFixed(2)}`
+    case 'errors': return `${value} err`
+    default: return `${value}×`
+  }
+}
+
+/** Per-node cells for the overlay: the value, its label, and its share of the hottest node. */
+export function overlayCells(metrics: Map<string, NodeMetrics> | undefined, overlay: GraphOverlay): Map<string, OverlayCell> {
+  const cells = new Map<string, OverlayCell>()
+  if (!metrics || overlay === 'runs') return cells
+  const color = OVERLAYS.find(o => o.id === overlay)!.color
+  let max = 0
+  for (const m of metrics.values()) max = Math.max(max, metricValue(m, overlay))
+  for (const [id, m] of metrics) {
+    const value = metricValue(m, overlay)
+    // Nothing to report (e.g. a plain function node has no tokens or cost)
+    if (value === 0 && overlay !== 'time') continue
+    cells.set(id, { value, text: formatMetric(value, overlay), heat: max > 0 ? value / max : 0, color })
+  }
+  return cells
+}
+
 interface GraphPanelProps {
   visible: boolean
   graphs: Map<string, AgentGraph>
   agents: Map<string, Agent>
+  /** The session's events, for the metric overlays */
+  events?: readonly SimulationEvent[]
   selectedAgentId: string | null
   currentTime: number
   isPlaying: boolean
@@ -64,12 +119,18 @@ function childGraphFor(graphs: Map<string, AgentGraph>, agents: Map<string, Agen
 }
 
 export const GraphPanel = memo(function GraphPanel({
-  visible, graphs, agents, selectedAgentId, currentTime, isPlaying, onAgentClick, onClose,
+  visible, graphs, agents, events, selectedAgentId, currentTime, isPlaying, onAgentClick, onClose,
 }: GraphPanelProps) {
   const agentId = visible ? pickGraphAgent(graphs, agents, selectedAgentId) : null
   const graph = agentId ? graphs.get(agentId) ?? null : null
   const layout = useMemo(() => (graph ? layoutGraph(graph) : null), [graph])
   const now = useSimulationClock(currentTime, isPlaying && visible)
+  const [overlay, setOverlay] = useState<GraphOverlay>('runs')
+  const cells = useMemo(() => {
+    if (!visible || !graph || overlay === 'runs' || !events) return new Map<string, OverlayCell>()
+    const metrics = analyzeRun(events, currentTime, { costOf: agentCost }).nodeMetrics.get(graph.agent)
+    return overlayCells(metrics, overlay)
+  }, [visible, graph, overlay, events, currentTime])
 
   if (!visible) return null
 
@@ -113,10 +174,31 @@ export const GraphPanel = memo(function GraphPanel({
           </div>
         ) : (
           <>
-            <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+            {events && (
+              <div className="flex items-center gap-1 mb-2 text-[9px] font-mono" role="group" aria-label="Color nodes by">
+                {OVERLAYS.map(o => (
+                  <button
+                    key={o.id}
+                    onClick={() => setOverlay(o.id)}
+                    title={o.title}
+                    className="px-1.5 py-0.5 rounded"
+                    style={{
+                      color: overlay === o.id ? o.color : COLORS.textMuted,
+                      border: `1px solid ${overlay === o.id ? o.color + '80' : COLORS.holoBorder06}`,
+                      background: overlay === o.id ? o.color + '14' : 'transparent',
+                    }}
+                    aria-pressed={overlay === o.id}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: 'calc(100vh - 250px)' }}>
               <GraphSvg
                 graph={graph}
                 layout={layout}
+                cells={cells}
                 currentTime={now}
                 onOpenSubgraph={(node) => {
                   const child = subgraphOf(graphs, agents, graph.agent, node)
@@ -125,7 +207,7 @@ export const GraphPanel = memo(function GraphPanel({
                 canOpen={(node) => subgraphOf(graphs, agents, graph.agent, node) !== null}
               />
             </div>
-            <GraphFooter graph={graph} layout={layout} />
+            <GraphFooter graph={graph} layout={layout} overlay={overlay} cells={cells} />
           </>
         )}
       </div>
@@ -161,12 +243,13 @@ function useSimulationClock(currentTime: number, running: boolean): number {
 interface GraphSvgProps {
   graph: AgentGraph
   layout: NonNullable<ReturnType<typeof layoutGraph>>
+  cells: Map<string, OverlayCell>
   currentTime: number
   onOpenSubgraph: (node: GraphNodeInfo) => void
   canOpen: (node: GraphNodeInfo) => boolean
 }
 
-function GraphSvg({ graph, layout, currentTime, onOpenSubgraph, canOpen }: GraphSvgProps) {
+function GraphSvg({ graph, layout, cells, currentTime, onOpenSubgraph, canOpen }: GraphSvgProps) {
   const edges = Object.values(graph.edges)
   // Draw untaken edges first so taken routes sit on top
   const ordered = [...edges].sort((a, b) => Math.min(1, a.traversals) - Math.min(1, b.traversals))
@@ -210,6 +293,7 @@ function GraphSvg({ graph, layout, currentTime, onOpenSubgraph, canOpen }: Graph
             key={id}
             node={node}
             box={box}
+            cell={cells.get(id)}
             openable={openable}
             onOpen={openable ? () => onOpenSubgraph(node) : undefined}
           />
@@ -250,8 +334,8 @@ function GraphEdgePath({ geo, traversals, conditional, hot, label }: {
   )
 }
 
-function GraphNodeBox({ node, box, openable, onOpen }: {
-  node: GraphNodeInfo; box: LayoutNode; openable: boolean; onOpen?: () => void
+function GraphNodeBox({ node, box, cell, openable, onOpen }: {
+  node: GraphNodeInfo; box: LayoutNode; cell?: OverlayCell; openable: boolean; onOpen?: () => void
 }) {
   const visited = node.visits > 0
   const running = node.running > 0
@@ -269,7 +353,9 @@ function GraphNodeBox({ node, box, openable, onOpen }: {
     running ? 'running now' : null,
     node.declared ? null : 'observed at runtime (not in declared graph)',
     node.error ? `error: ${node.error}` : null,
+    cell ? `${cell.text}${cell.heat < 1 ? ` · ${Math.round(cell.heat * 100)}% of the top node` : ' · the top node'}` : null,
   ].filter(Boolean).join('\n')
+  const pillW = cell ? cell.text.length * 5 + 8 : 0
 
   return (
     <g
@@ -293,6 +379,9 @@ function GraphNodeBox({ node, box, openable, onOpen }: {
         strokeWidth={visited || running ? 1.4 : 1}
         strokeDasharray={!visited && !node.declared ? '3 2' : undefined}
       />
+      {cell && (
+        <rect width={box.w} height={box.h} rx={rx} fill={cell.color} fillOpacity={0.06 + 0.5 * cell.heat} stroke={cell.color} strokeOpacity={0.25 + 0.6 * cell.heat} strokeWidth={cell.heat > 0.66 ? 1.6 : 1} />
+      )}
       <text
         x={box.w / 2}
         y={box.h / 2}
@@ -312,6 +401,12 @@ function GraphNodeBox({ node, box, openable, onOpen }: {
           <text textAnchor="middle" dominantBaseline="central" fontSize={7.5} fill={COLORS.textPrimary}>×{node.visits}</text>
         </g>
       )}
+      {cell && !terminal && (
+        <g transform={`translate(${box.w - pillW + 4}, ${-6})`}>
+          <rect width={pillW} height={12} rx={6} fill={COLORS.void} stroke={cell.color} strokeOpacity={0.8} />
+          <text x={pillW / 2} y={6} textAnchor="middle" dominantBaseline="central" fontSize={7.5} fill={cell.color}>{cell.text}</text>
+        </g>
+      )}
     </g>
   )
 }
@@ -323,7 +418,15 @@ function truncateLabel(label: string, width: number): string {
 
 // ─── Footer ──────────────────────────────────────────────────────────────────
 
-function GraphFooter({ graph, layout }: { graph: AgentGraph; layout: NonNullable<ReturnType<typeof layoutGraph>> }) {
+function GraphFooter({ graph, layout, overlay, cells }: {
+  graph: AgentGraph; layout: NonNullable<ReturnType<typeof layoutGraph>>; overlay: GraphOverlay; cells: Map<string, OverlayCell>
+}) {
+  let top: [string, OverlayCell] | null = null
+  let total = 0
+  for (const entry of cells) {
+    total += entry[1].value
+    if (!top || entry[1].value > top[1].value) top = entry
+  }
   const real = Object.values(graph.nodes).filter(n => n.kind !== 'start' && n.kind !== 'end')
   const ran = real.filter(n => n.visits > 0).length
   let loops = 0
@@ -344,6 +447,13 @@ function GraphFooter({ graph, layout }: { graph: AgentGraph; layout: NonNullable
         <svg width={10} height={10}><rect x={1} y={1} width={8} height={8} rx={2} fill="none" stroke={COLORS.tool_calling} strokeWidth={1.5} /></svg>
         running
       </span>
+      {overlay !== 'runs' && (
+        <span className="w-full" style={{ color: COLORS.textDim }}>
+          {top && total > 0
+            ? <>Most {overlay === 'errors' ? 'errors' : overlay}: <span style={{ color: top[1].color }}>{top[0]}</span> {top[1].text}{cells.size > 1 ? ` (${Math.round((top[1].value / total) * 100)}% of all nodes)` : ''}</>
+            : `No ${overlay} recorded for these nodes yet.`}
+        </span>
+      )}
       {!graph.hasStructure && (
         <span className="w-full" style={{ color: COLORS.textFaint }}>
           Showing observed routes only. Pass <code>graph=</code> to the adapter to see every declared route.

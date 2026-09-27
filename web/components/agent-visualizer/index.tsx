@@ -37,13 +37,13 @@ export function AgentVisualizer() {
     edges,
     discoveries,
     fileAttention,
-    timelineEntries,
     currentTime,
     isPlaying,
     speed,
     maxTimeReached,
     conversations,
     graphs,
+    eventLog,
     play,
     pause,
     restart,
@@ -401,6 +401,7 @@ export function AgentVisualizer() {
         visible={showGraph}
         graphs={graphs}
         agents={agents}
+        events={eventLog}
         selectedAgentId={selection.selectedAgentId}
         currentTime={currentTime}
         isPlaying={isPlaying}
@@ -411,8 +412,9 @@ export function AgentVisualizer() {
       {/* Timeline panel (slide-in from bottom) */}
       <TimelinePanel
         visible={showTimeline}
-        timelineEntries={timelineEntries}
+        events={eventLog}
         currentTime={currentTime}
+        onAgentClick={selection.handleAgentClick}
         onClose={() => setShowTimeline(false)}
       />
 
