@@ -47,6 +47,8 @@ from strands.hooks.events import (
     MessageAddedEvent,
 )
 
+from ._sink import EventSink
+
 logger = logging.getLogger(__name__)
 
 _MAX_CONTENT = 10_000
@@ -136,13 +138,24 @@ class AgentFlowHooks(HookProvider):
         path: JSONL file to append to. Defaults to ``$AGENT_FLOW_EVENT_LOG``,
             then ``agent-flow-events.jsonl`` in the current directory.
         truncate: Empty the file before the first event is written.
+        url: Send events to an Agent Flow relay's ``/ingest`` endpoint instead of
+            a file (defaults to ``$AGENT_FLOW_URL``); ``token`` authenticates it
+            (``$AGENT_FLOW_TOKEN``) and ``session`` labels its tab.
+        content: ``"metadata"`` replaces prompts, arguments, results and
+            messages with their length (``$AGENT_FLOW_CONTENT``).
+        redact: ``(event_type, payload) -> payload | None`` to scrub or drop events.
+        sample_rate: Fraction of top-level runs to record (``$AGENT_FLOW_SAMPLE_RATE``).
+
+    Events are delivered from a background thread; ``flush()`` waits for them
+    and ``close()`` stops it (both also run at exit).
     """
 
-    def __init__(self, path: Optional[str] = None, *, truncate: bool = False) -> None:
-        self.path = path or os.environ.get("AGENT_FLOW_EVENT_LOG") or "agent-flow-events.jsonl"
-        self._truncate = truncate
+    def __init__(self, path: Optional[str] = None, *, truncate: bool = False,
+                 url: Optional[str] = None, token: Optional[str] = None, session: Optional[str] = None, content: Optional[str] = None, redact: Any = None, sample_rate: Optional[float] = None) -> None:
+        self._sink = EventSink(path, truncate=truncate, url=url, token=token, session=session,
+                               content=content, redact=redact, sample_rate=sample_rate)
+        self.path = self._sink.path
         self._lock = threading.RLock()
-        self._start: Optional[float] = None
         self._warned = False
 
         # Names are held only while an agent runs: a later agent with the same
@@ -206,17 +219,16 @@ class AgentFlowHooks(HookProvider):
 
     # ─── Output ──────────────────────────────────────────────────────────────
 
+    def flush(self, timeout: float = 5.0) -> None:
+        """Wait until queued events have been written or sent."""
+        self._sink.flush(timeout)
+
+    def close(self) -> None:
+        """Flush and stop the background writer."""
+        self._sink.close()
+
     def _emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        with self._lock:
-            now = time.monotonic()
-            if self._start is None:
-                self._start = now
-            event = {"time": round(now - self._start, 3), "type": event_type, "payload": payload}
-            os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-            mode = "w" if self._truncate else "a"
-            self._truncate = False
-            with open(self.path, mode, encoding="utf-8") as f:
-                f.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
+        self._sink.emit(event_type, payload)
 
     # ─── Agents ──────────────────────────────────────────────────────────────
 

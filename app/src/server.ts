@@ -18,6 +18,14 @@ interface ServerOptions {
   verbose?: boolean
   /** Event logs from --event-log; falls back to AGENT_FLOW_EVENT_LOG when empty. */
   eventLogs?: string[]
+  /** Separate listener that accepts only POST /ingest (for agents on other hosts) */
+  ingestHost?: string
+  ingestPort?: number
+  ingestToken?: string
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
 export async function startServer(options: ServerOptions) {
@@ -31,12 +39,21 @@ export async function startServer(options: ServerOptions) {
   await telemetry.init()
 
   const eventLogs = options.eventLogs?.length ? options.eventLogs.map(p => path.resolve(p)) : undefined
-  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry, eventLogs })
+  if (options.ingestHost && !isLoopbackHost(options.ingestHost) && !options.ingestToken) {
+    console.error('Refusing to accept events from other hosts without a token: pass --ingest-token or set AGENT_FLOW_INGEST_TOKEN.')
+    process.exit(1)
+  }
+  const relay = await createRelay({ workspace, verbose: options.verbose, telemetry, eventLogs, ingestToken: options.ingestToken })
 
   const server = http.createServer((req, res) => {
     // SSE endpoint
     if (req.url === '/events') {
       return relay.handleSSE(req, res)
+    }
+
+    // Events from adapters' HTTP transport (loopback, or with a token)
+    if (req.url === '/ingest') {
+      return relay.handleIngest(req, res)
     }
 
     // Static files (UI)
@@ -47,6 +64,21 @@ export async function startServer(options: ServerOptions) {
     res.writeHead(404)
     res.end('Not found')
   })
+
+  // Optional network listener that serves nothing but /ingest
+  let ingestServer: http.Server | null = null
+  if (options.ingestHost || options.ingestPort) {
+    const ingestHost = options.ingestHost ?? '127.0.0.1'
+    const ingestPort = options.ingestPort ?? port + 100
+    ingestServer = http.createServer((req, res) => {
+      if (req.url === '/ingest') return relay.handleIngest(req, res)
+      res.writeHead(404)
+      res.end('Not found')
+    })
+    ingestServer.listen(ingestPort, ingestHost, () => {
+      console.log(`Accepting events at http://${ingestHost}:${ingestPort}/ingest${options.ingestToken ? ' (token required)' : ''}`)
+    })
+  }
 
   server.listen(port, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${port}`
@@ -66,6 +98,7 @@ export async function startServer(options: ServerOptions) {
     if (shuttingDown) return
     shuttingDown = true
     server.close()
+    ingestServer?.close()
     relay.dispose()
     void telemetry.dispose().finally(() => process.exit(0))
   }

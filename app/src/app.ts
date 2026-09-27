@@ -27,4 +27,7 @@ startServer({
   workspace: process.cwd(),
   verbose: args.verbose,
   eventLogs: args.eventLogs,
+  ingestHost: args.ingestHost,
+  ingestPort: args.ingestPort,
+  ingestToken: args.ingestToken,
 })

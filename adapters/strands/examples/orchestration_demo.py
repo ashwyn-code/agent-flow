@@ -248,7 +248,10 @@ def run(out: str, delay: float = DELAY) -> Any:
     _pricing_attempts.clear()
     flow = AgentFlowHooks(out, truncate=True)
     graph = build(flow)
-    return graph(REQUEST)
+    try:
+        return graph(REQUEST)
+    finally:
+        flow.flush()
 
 
 def main(argv: Optional[List[str]] = None) -> None:

@@ -28,6 +28,7 @@ def flow(tmp_path):
 
 
 def events_of(flow):
+    flow.flush()
     with open(flow.path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 

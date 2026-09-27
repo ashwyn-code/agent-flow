@@ -35,6 +35,9 @@ async function main() {
     if (req.url === '/events') {
       return relay.handleSSE(req, res)
     }
+    if (req.url === '/ingest') {
+      return relay.handleIngest(req, res)
+    }
 
     res.writeHead(200, { 'Content-Type': 'text/plain' })
     res.end('Agent Flow Dev Relay')

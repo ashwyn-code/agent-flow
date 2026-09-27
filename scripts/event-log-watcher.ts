@@ -55,39 +55,21 @@ function parseLine(line: string): AgentEvent | null {
   return null
 }
 
-export class EventLogWatcher {
-  private readonly idPrefix: string
-  private fileSize = 0
-  private tail = ''
+/**
+ * Turns a stream of Agent Flow events from one source into relay sessions:
+ * starts a session on the first event, labels it with the first user
+ * prompt, ends it when the main agent completes, and reopens it if the same
+ * source starts again. Shared by event log files and HTTP ingest.
+ */
+export class SessionTracker {
   private runCount = 0
   private run: RunState | null = null
-  private head: Buffer | null = null
-  private pollTimer: NodeJS.Timeout | null = null
-  private watcher: fs.FSWatcher | null = null
 
   constructor(
-    readonly filePath: string,
+    private readonly idPrefix: string,
+    private readonly defaultLabel: string,
     private readonly callbacks: EventLogCallbacks,
-    private readonly pollMs = DEFAULT_POLL_MS,
-  ) {
-    const hash = crypto.createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 8)
-    this.idPrefix = `eventlog-${hash}`
-  }
-
-  /** Read what's already in the file, then keep following it. The file may
-   *  not exist yet — it's picked up once something starts writing it. */
-  start(): void {
-    this.poll()
-    this.pollTimer = setInterval(() => this.poll(), this.pollMs)
-  }
-
-  private watchFile(): void {
-    if (this.watcher) return
-    try {
-      this.watcher = fs.watch(this.filePath, () => this.poll())
-      this.watcher.on('error', () => { this.watcher?.close(); this.watcher = null })
-    } catch { /* polling still covers it */ }
-  }
+  ) {}
 
   getSessions(): SessionInfo[] {
     if (!this.run) return []
@@ -95,52 +77,10 @@ export class EventLogWatcher {
     return [{ id, label, status, startTime, lastActivityTime }]
   }
 
-  dispose(): void {
-    if (this.pollTimer) clearInterval(this.pollTimer)
-    this.pollTimer = null
-    this.watcher?.close()
-    this.watcher = null
-  }
-
-  /** Exposed for tests; normally driven by the poll timer. */
-  poll(): void {
-    if (this.fileSize > 0 && this.head && !this.head.equals(this.readHead(this.head.length))) {
-      this.resetForNewRun()
-    }
-    const result = readNewFileLines(this.filePath, this.fileSize, this.tail)
-    if (!result) return
-    this.watchFile()
-    if (result.newSize === 0 && this.fileSize > 0) {
-      this.resetForNewRun()
-      return
-    }
-    this.fileSize = result.newSize
-    this.tail = result.tail
-    if (!this.head || this.head.length < HEAD_BYTES) this.head = this.readHead(HEAD_BYTES)
-    for (const line of result.lines) {
-      const event = parseLine(line)
-      if (event) this.handleEvent(event)
-    }
-  }
-
-  /** The file was truncated or rewritten: the writer started a new run. */
-  private resetForNewRun(): void {
+  /** The source started over (e.g. a truncated log): end this session. */
+  reset(): void {
     this.endRun()
     this.run = null
-    this.fileSize = 0
-    this.tail = ''
-    this.head = null
-  }
-
-  private readHead(length: number): Buffer {
-    try {
-      const fd = fs.openSync(this.filePath, 'r')
-      try {
-        const buf = Buffer.alloc(length)
-        const n = fs.readSync(fd, buf, 0, length, 0)
-        return buf.subarray(0, n)
-      } finally { fs.closeSync(fd) }
-    } catch { return Buffer.alloc(0) }
   }
 
   private beginRun(): RunState {
@@ -148,7 +88,7 @@ export class EventLogWatcher {
     const now = Date.now()
     const run: RunState = {
       id: `${this.idPrefix}-${this.runCount}`,
-      label: path.basename(this.filePath),
+      label: this.defaultLabel,
       labelSet: false,
       mainAgent: null,
       status: 'active',
@@ -168,7 +108,7 @@ export class EventLogWatcher {
     }
   }
 
-  private handleEvent(event: AgentEvent): void {
+  handle(event: AgentEvent): void {
     const run = this.run ?? this.beginRun()
     run.lastActivityTime = Date.now()
     const payload = event.payload as Record<string, unknown>
@@ -196,5 +136,89 @@ export class EventLogWatcher {
     if (event.type === 'agent_complete' && run.mainAgent !== null && payload.name === run.mainAgent) {
       this.endRun()
     }
+  }
+}
+
+export class EventLogWatcher {
+  private fileSize = 0
+  private tail = ''
+  private head: Buffer | null = null
+  private pollTimer: NodeJS.Timeout | null = null
+  private watcher: fs.FSWatcher | null = null
+  private readonly sessions: SessionTracker
+
+  constructor(
+    readonly filePath: string,
+    callbacks: EventLogCallbacks,
+    private readonly pollMs = DEFAULT_POLL_MS,
+  ) {
+    const hash = crypto.createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 8)
+    this.sessions = new SessionTracker(`eventlog-${hash}`, path.basename(filePath), callbacks)
+  }
+
+  /** Read what's already in the file, then keep following it. The file may
+   *  not exist yet — it's picked up once something starts writing it. */
+  start(): void {
+    this.poll()
+    this.pollTimer = setInterval(() => this.poll(), this.pollMs)
+  }
+
+  private watchFile(): void {
+    if (this.watcher) return
+    try {
+      this.watcher = fs.watch(this.filePath, () => this.poll())
+      this.watcher.on('error', () => { this.watcher?.close(); this.watcher = null })
+    } catch { /* polling still covers it */ }
+  }
+
+  getSessions(): SessionInfo[] {
+    return this.sessions.getSessions()
+  }
+
+  dispose(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    this.pollTimer = null
+    this.watcher?.close()
+    this.watcher = null
+  }
+
+  /** Exposed for tests; normally driven by the poll timer. */
+  poll(): void {
+    if (this.fileSize > 0 && this.head && !this.head.equals(this.readHead(this.head.length))) {
+      this.resetForNewRun()
+    }
+    const result = readNewFileLines(this.filePath, this.fileSize, this.tail)
+    if (!result) return
+    this.watchFile()
+    if (result.newSize === 0 && this.fileSize > 0) {
+      this.resetForNewRun()
+      return
+    }
+    this.fileSize = result.newSize
+    this.tail = result.tail
+    if (!this.head || this.head.length < HEAD_BYTES) this.head = this.readHead(HEAD_BYTES)
+    for (const line of result.lines) {
+      const event = parseLine(line)
+      if (event) this.sessions.handle(event)
+    }
+  }
+
+  /** The file was truncated or rewritten: the writer started a new run. */
+  private resetForNewRun(): void {
+    this.sessions.reset()
+    this.fileSize = 0
+    this.tail = ''
+    this.head = null
+  }
+
+  private readHead(length: number): Buffer {
+    try {
+      const fd = fs.openSync(this.filePath, 'r')
+      try {
+        const buf = Buffer.alloc(length)
+        const n = fs.readSync(fd, buf, 0, length, 0)
+        return buf.subarray(0, n)
+      } finally { fs.closeSync(fd) }
+    } catch { return Buffer.alloc(0) }
   }
 }

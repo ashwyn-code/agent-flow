@@ -64,6 +64,10 @@ Callers are found with context variables. Strands copies the context into the th
 
 **Graph routing:** a node's `from` lists the predecessors that produced new output since the node last ran, with each edge's condition re-checked. Edge conditions are therefore evaluated one extra time, so keep them free of side effects. `__end__` is reached from nodes whose latest output nothing downstream used. Swarm hops follow the handoff order.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

@@ -16,6 +16,7 @@ import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagen
 import { handlePermissionDetection } from '../extension/src/permission-detection'
 import { CodexSessionWatcher } from '../extension/src/codex-session-watcher'
 import { EventLogWatcher, parseEventLogPaths } from './event-log-watcher'
+import { IngestServer } from './ingest'
 import {
   INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, SYSTEM_PROMPT_BASE_TOKENS, ORCHESTRATOR_NAME,
@@ -354,6 +355,8 @@ function removeDiscoveryFile() {
 export interface Relay {
   /** Handle an incoming SSE connection */
   handleSSE: (req: http.IncomingMessage, res: http.ServerResponse) => void
+  /** Handle `POST /ingest` (events from adapters' HTTP transport) */
+  handleIngest: (req: http.IncomingMessage, res: http.ServerResponse) => void
   /** Clean up all resources */
   dispose: () => void
 }
@@ -372,6 +375,9 @@ export interface RelayOptions {
    *  Defaults to the AGENT_FLOW_EVENT_LOG env var (paths joined by the platform
    *  path delimiter). Watched regardless of `runtime`. */
   eventLogs?: string[]
+  /** Bearer token required on `POST /ingest`. Defaults to AGENT_FLOW_INGEST_TOKEN.
+   *  Without one, only loopback clients may post events. */
+  ingestToken?: string
 }
 
 function resolveRuntimeMode(explicit?: RelayRuntimeMode): RelayRuntimeMode {
@@ -456,6 +462,12 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     return watcher
   })
 
+  // ─── HTTP ingest ──────────────────────────────────────────────────────────
+  const ingest = new IngestServer(
+    { onEvent: broadcastEvent, onLifecycle: broadcastSessionLifecycle },
+    { token: options.ingestToken ?? (process.env.AGENT_FLOW_INGEST_TOKEN || undefined) },
+  )
+
   const telemetry = options.telemetry
   const sessionStart = Date.now()
   let relayDisposed = false
@@ -487,6 +499,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   })
 
   return {
+    handleIngest(req: http.IncomingMessage, res: http.ServerResponse) {
+      ingest.handle(req, res)
+    },
+
     handleSSE(req: http.IncomingMessage, res: http.ServerResponse) {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -514,6 +530,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       }
       if (codexWatcher) sessionList.push(...codexWatcher.getActiveSessions())
       for (const watcher of eventLogWatchers) sessionList.push(...watcher.getSessions())
+      sessionList.push(...ingest.getSessions())
       if (sessionList.length > 0) {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }

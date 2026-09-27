@@ -70,6 +70,10 @@ The demo is a product-launch Flow with 14 agents, nested four levels deep:
 - **Crew kickoffs are serialized.** Crews started from parallel Flow methods run one after another, even though the methods start together.
 - **Silent tool retries.** CrewAI sometimes retries a failing tool internally before any event fires. Tool errors that CrewAI reports show up as failed calls.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

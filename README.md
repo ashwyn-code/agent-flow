@@ -149,6 +149,35 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 - **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, a nested ADK workflow agent, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
 - **Replay:** scrubbing the timeline replays the graph state too.
 
+## Beyond your laptop: HTTP, redaction and sampling
+
+The adapters are safe to leave installed. Every adapter delivers events from a background thread through a bounded queue. If the queue fills, or a relay is down, events are dropped and counted rather than slowing your agents down, and nothing the visualizer does can raise into your code.
+
+**Send events over HTTP.** Instead of a file, point an adapter at a relay's `/ingest` endpoint. Agents in other processes, containers or hosts then stream into one Agent Flow, and each sender gets its own session tab.
+
+```bash
+# Where the viewer runs: the UI stays on 127.0.0.1; a separate listener accepts only /ingest
+node app/dist/app.js --ingest-host 0.0.0.0 --ingest-port 3101 --ingest-token "$TOKEN"
+
+# In the agent's environment
+export AGENT_FLOW_URL=http://agent-flow.internal:3101/ingest
+export AGENT_FLOW_TOKEN=...
+```
+
+`/ingest` on the app's own port accepts loopback clients without a token. The separate listener won't start on a non-local address without `--ingest-token` (or `AGENT_FLOW_INGEST_TOKEN`). The viewer itself has no login, so keep it on localhost or put it behind your own authenticating proxy.
+
+**Control what leaves the process.** These can be passed to any adapter's constructor or set as environment variables:
+
+| Option | Environment | Effect |
+|---|---|---|
+| `url=`, `token=` | `AGENT_FLOW_URL`, `AGENT_FLOW_TOKEN` | Send to a relay instead of a file |
+| `session=` | | Label for this sender's session tab |
+| `content="metadata"` | `AGENT_FLOW_CONTENT=metadata` | Keep the run's shape (agents, tools, timing, errors, tokens) but replace prompts, arguments, results and messages with their length |
+| `redact=fn` | | `fn(event_type, payload) -> payload \| None` rewrites any event, or drops it by returning `None` |
+| `sample_rate=0.05` | `AGENT_FLOW_SAMPLE_RATE` | Record that fraction of top-level runs. Each decision covers a whole run |
+
+Call `flush()` to wait for delivery (it also runs at exit). The shared implementation is [adapters/_shared/agent_flow_sink.py](adapters/_shared/agent_flow_sink.py). Each adapter carries a copy, kept identical by `python adapters/sync_sink.py`. Persistent storage and search aren't part of the relay; for production traffic, keep a real observability backend as your system of record.
+
 ## JSONL event format
 
 To add another framework, write one JSON object per line:
@@ -251,7 +280,7 @@ Other scripts:
 | `pnpm run build:app` | Build the standalone app into `app/dist/` |
 | `pnpm test` | Relay, event log, graph layout and graph event tests |
 
-Each adapter has its own tests, which run offline against fake models:
+Each adapter has its own tests, which run offline against fake models. The shared event sink has tests too (`pytest adapters/_shared/tests`), and `python adapters/sync_sink.py --check` verifies every adapter's copy of it:
 
 ```bash
 pip install -e 'adapters/<adapter>[dev]'

@@ -110,6 +110,7 @@ def main(argv: List[str] = None) -> None:
         {"messages": [HumanMessage("Write a short report on SaaS churn benchmarks")]},
         config={"callbacks": [handler]},
     )
+    handler.flush()
     print(result["messages"][-1].content)
     print(f"events written to {args.out}")
 

@@ -169,6 +169,7 @@ async def run(out: str, delay: float = DELAY) -> str:
         for part in (event.content.parts if event.content else None) or []:
             if part.text and not part.thought:
                 final = part.text
+    plugin.flush()
     return final
 
 

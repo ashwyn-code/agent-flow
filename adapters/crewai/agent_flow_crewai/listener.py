@@ -40,6 +40,8 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from crewai.events import crewai_event_bus
 from crewai.events.base_events import BaseEvent
 
+from ._sink import EventSink
+
 logger = logging.getLogger(__name__)
 
 _MAX_CONTENT = 10_000
@@ -144,12 +146,23 @@ class AgentFlowListener:
         path: JSONL file to append to. Defaults to ``$AGENT_FLOW_EVENT_LOG``,
             then ``agent-flow-events.jsonl`` in the current directory.
         truncate: Empty the file before the first event is written.
+        url: Send events to an Agent Flow relay's ``/ingest`` endpoint instead of
+            a file (defaults to ``$AGENT_FLOW_URL``); ``token`` authenticates it
+            (``$AGENT_FLOW_TOKEN``) and ``session`` labels its tab.
+        content: ``"metadata"`` replaces prompts, arguments, results and
+            messages with their length (``$AGENT_FLOW_CONTENT``).
+        redact: ``(event_type, payload) -> payload | None`` to scrub or drop events.
+        sample_rate: Fraction of top-level runs to record (``$AGENT_FLOW_SAMPLE_RATE``).
+
+    Events are delivered from a background thread; ``flush()`` waits for them
+    and ``close()`` stops it (both also run at exit).
     """
 
-    def __init__(self, path: Optional[str] = None, *, truncate: bool = False) -> None:
-        self.path = path or os.environ.get("AGENT_FLOW_EVENT_LOG") or "agent-flow-events.jsonl"
-        self._truncate = truncate
-        self._start: Optional[float] = None
+    def __init__(self, path: Optional[str] = None, *, truncate: bool = False,
+                 url: Optional[str] = None, token: Optional[str] = None, session: Optional[str] = None, content: Optional[str] = None, redact: Any = None, sample_rate: Optional[float] = None) -> None:
+        self._sink = EventSink(path, truncate=truncate, url=url, token=token, session=session,
+                               content=content, redact=redact, sample_rate=sample_rate)
+        self.path = self._sink.path
         self._warned = False
 
         # Reorder buffer, drained by a worker thread in emission order
@@ -223,6 +236,7 @@ class AgentFlowListener:
                     break
             time.sleep(0.02)
         time.sleep(0.02)  # let the worker finish the event it popped
+        self._sink.flush(timeout)
 
     def close(self) -> None:
         """Flush, then stop listening. Safe to call more than once."""
@@ -238,6 +252,7 @@ class AgentFlowListener:
             self._closed = True
             self._cond.notify_all()
         self._worker.join(timeout=5)
+        self._sink.close()
 
     def _safe_process(self, event: Any, source: Any) -> None:
         try:
@@ -250,15 +265,7 @@ class AgentFlowListener:
     # ─── Output ──────────────────────────────────────────────────────────────
 
     def _emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        now = time.monotonic()
-        if self._start is None:
-            self._start = now
-        record = {"time": round(now - self._start, 3), "type": event_type, "payload": payload}
-        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-        mode = "w" if self._truncate else "a"
-        self._truncate = False
-        with open(self.path, mode, encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
+        self._sink.emit(event_type, payload)
 
     # ─── Scope resolution ────────────────────────────────────────────────────
 

@@ -40,6 +40,7 @@ def processor(tmp_path):
 
 
 def events_of(processor):
+    processor.flush()
     if not os.path.exists(processor.path):
         return []
     with open(processor.path, encoding="utf-8") as f:

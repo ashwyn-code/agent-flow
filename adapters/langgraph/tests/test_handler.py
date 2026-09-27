@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples"))
 import multi_agent_demo as demo  # noqa: E402
 
 from agent_flow_langgraph import AgentFlowCallbackHandler  # noqa: E402
+from agent_flow_langgraph._sink import flush_all  # noqa: E402
 
 # Event types the webview understands (web/hooks/simulation/process-event.ts).
 KNOWN_TYPES = {
@@ -28,6 +29,7 @@ def no_delay(monkeypatch):
 
 
 def read_events(path):
+    flush_all()
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -216,6 +218,7 @@ def test_truncate_resets_file(tmp_path):
     path.write_text("stale\n")
     run = AgentFlowCallbackHandler(str(path), truncate=True)
     demo.build_graph().invoke({"messages": [HumanMessage("x")]}, config={"callbacks": [run]})
+    flush_all()
     assert "stale" not in path.read_text()
 
 

@@ -70,6 +70,10 @@ A few details:
 
 **Not yet covered:** ADK 2.x's `Workflow` graph API (`google.adk.workflow`). `LlmAgent` nodes inside a `Workflow` show up as agents, but function and join nodes report only their completion and are not drawn.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

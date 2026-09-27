@@ -48,6 +48,7 @@ def run(plugin, root, text="go", streaming=False):
 
 
 def events_of(plugin):
+    plugin.flush()
     if not os.path.exists(plugin.path):
         return []
     with open(plugin.path, encoding="utf-8") as f:

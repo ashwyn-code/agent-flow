@@ -40,6 +40,8 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
+from ._sink import EventSink
+
 AgentKey = Tuple[str, ...]
 
 _MAX_CONTENT = 10_000
@@ -190,6 +192,16 @@ class AgentFlowCallbackHandler(BaseCallbackHandler):
         graph: The compiled graph being run. Optional; when given, its static
             structure (and its subgraphs') is sent so the UI can draw routes
             that weren't taken too.
+        url: Send events to an Agent Flow relay's ``/ingest`` endpoint instead of
+            a file (defaults to ``$AGENT_FLOW_URL``); ``token`` authenticates it
+            (``$AGENT_FLOW_TOKEN``) and ``session`` labels its tab.
+        content: ``"metadata"`` replaces prompts, arguments, results and
+            messages with their length (``$AGENT_FLOW_CONTENT``).
+        redact: ``(event_type, payload) -> payload | None`` to scrub or drop events.
+        sample_rate: Fraction of top-level runs to record (``$AGENT_FLOW_SAMPLE_RATE``).
+
+    Events are delivered from a background thread; ``flush()`` waits for them
+    and ``close()`` stops it (both also run at exit).
     """
 
     raise_error = False
@@ -201,13 +213,19 @@ class AgentFlowCallbackHandler(BaseCallbackHandler):
         main_agent_name: Optional[str] = None,
         truncate: bool = False,
         graph: Any = None,
+        url: Optional[str] = None,
+        token: Optional[str] = None,
+        session: Optional[str] = None,
+        content: Optional[str] = None,
+        redact: Any = None,
+        sample_rate: Optional[float] = None,
     ) -> None:
-        self.path = path or os.environ.get("AGENT_FLOW_EVENT_LOG") or "agent-flow-events.jsonl"
+        self._sink = EventSink(path, truncate=truncate, url=url, token=token, session=session,
+                               content=content, redact=redact, sample_rate=sample_rate)
+        self.path = self._sink.path
         self._main_name_override = main_agent_name
         self._main_name: Optional[str] = None
-        self._truncate = truncate
         self._lock = threading.RLock()
-        self._start: Optional[float] = None
 
         # Agents spawned so far, keyed by namespace prefix ( () is the main agent).
         self._agents: Dict[AgentKey, str] = {}
@@ -230,18 +248,16 @@ class AgentFlowCallbackHandler(BaseCallbackHandler):
 
     # ─── Output ──────────────────────────────────────────────────────────────
 
+    def flush(self, timeout: float = 5.0) -> None:
+        """Wait until queued events have been written or sent."""
+        self._sink.flush(timeout)
+
+    def close(self) -> None:
+        """Flush and stop the background writer."""
+        self._sink.close()
+
     def _emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        with self._lock:
-            now = time.monotonic()
-            if self._start is None:
-                self._start = now
-            event = {"time": round(now - self._start, 3), "type": event_type, "payload": payload}
-            directory = os.path.dirname(os.path.abspath(self.path))
-            os.makedirs(directory, exist_ok=True)
-            mode = "w" if self._truncate else "a"
-            self._truncate = False
-            with open(self.path, mode, encoding="utf-8") as f:
-                f.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
+        self._sink.emit(event_type, payload)
 
     # ─── Agent resolution ────────────────────────────────────────────────────
 

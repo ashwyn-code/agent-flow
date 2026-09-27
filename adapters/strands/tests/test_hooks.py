@@ -29,6 +29,7 @@ def flow(tmp_path):
 
 
 def events_of(flow):
+    flow.flush()
     with open(flow.path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -104,7 +105,9 @@ def test_agents_as_tools_become_subagents_even_in_parallel(flow):
     def delegate(topic: str) -> str:
         """Hand a topic to a fresh specialist agent."""
         barrier.wait()  # all three specialists are in flight together
-        specialist = make("specialist", say(f"notes on {topic}"), hooks=[flow])
+        # A slow model keeps all three specialist runs in flight at once
+        specialist = Agent(name="specialist", model=RuleBasedModel(say(f"notes on {topic}"), delay=lambda: 0.2),
+                           hooks=[flow], callback_handler=None)
         return str(specialist(f"research {topic}"))
 
     boss = make("boss", react(lambda task: [[("delegate", {"topic": t}) for t in ("a", "b", "c")]],

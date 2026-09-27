@@ -65,6 +65,10 @@ The demo is an incident-response workflow with 12 agents, nested four levels dee
 
 **How workflows are observed:** workflows have no public observer API, so `instrument(workflow)` replaces two methods on that instance: the workflow's `run`, and each executor's `execute`. Classes are untouched. `execute` receives the ids of the executors whose messages triggered it, so every hop is exact, including fan-in from several sources. `__end__` is reached from the executors whose latest output nothing downstream used.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

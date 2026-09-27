@@ -245,7 +245,10 @@ async def run(out: str, delay: float = DELAY) -> Any:
     _attempts.clear()
     flow = AgentFlow(out, truncate=True)
     workflow = build(flow)
-    return await workflow.run(ALERT)
+    try:
+        return await workflow.run(ALERT)
+    finally:
+        flow.flush()
 
 
 def main(argv: Optional[List[str]] = None) -> None:

@@ -439,10 +439,13 @@ def run(out: str, delay: float = DELAY) -> dict:
     _sql_attempts.clear()
     graph = build_graph()
     handler = AgentFlowCallbackHandler(out, truncate=True, graph=graph)
-    return graph.invoke(
-        {"messages": [HumanMessage(REQUEST)], "revisions": 0},
-        config={"callbacks": [handler], "recursion_limit": 50},
-    )
+    try:
+        return graph.invoke(
+            {"messages": [HumanMessage(REQUEST)], "revisions": 0},
+            config={"callbacks": [handler], "recursion_limit": 50},
+        )
+    finally:
+        handler.flush()
 
 
 def main(argv: Optional[List[str]] = None) -> None:

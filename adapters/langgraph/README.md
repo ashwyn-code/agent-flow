@@ -94,6 +94,10 @@ Superstep attribution: a node's `from` is the set of nodes that ran in the previ
 
 - **Coding-agent panels:** panels built for coding agents, such as file attention and permission requests, stay empty.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

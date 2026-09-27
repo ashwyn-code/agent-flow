@@ -64,6 +64,10 @@ The SDK calls trace processors synchronously, in the task that opens or closes e
 - **Tool arguments:** the SDK fills them in just after opening a function span, so the tool call is reported on the next turn of the event loop.
 - **Agent handoffs and tools:** these are only complete when an agent's span ends, so each agent's declared routes are added to the graph then.
 
+## Sending events elsewhere
+
+The constructor also takes `url=`, `token=`, `session=`, `content="metadata"`, `redact=` and `sample_rate=` (or the matching `AGENT_FLOW_*` environment variables). You can send events to a relay over HTTP, strip content, or sample runs. Events are delivered in the background, and `flush()` waits for them. See [Beyond your laptop](../../README.md#beyond-your-laptop-http-redaction-and-sampling) in the main README.
+
 ## Tests
 
 ```bash

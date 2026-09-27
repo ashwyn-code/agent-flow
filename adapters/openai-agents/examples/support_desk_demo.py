@@ -166,10 +166,11 @@ async def run(out: str, delay: float = DELAY) -> Any:
     global DELAY
     DELAY = delay
     _status_calls.clear()
-    install(out, truncate=True, exclusive=True)  # exclusive: no upload to the OpenAI trace dashboard
+    processor = install(out, truncate=True, exclusive=True)  # exclusive: no upload to the OpenAI trace dashboard
     agents = build()
     with trace("Support desk"):
         support, mood = await asyncio.gather(Runner.run(agents["triage"], TICKET), Runner.run(agents["sentiment"], TICKET))
+    processor.flush()
     return support.final_output, mood.final_output
 
 
