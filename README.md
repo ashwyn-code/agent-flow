@@ -1,6 +1,6 @@
 # Agent Flow
 
-Real-time visualization of Claude Code and Codex agent orchestration. Watch your agents think, branch, and coordinate as they work. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA). 
+Real-time visualization of AI agent orchestration. Watch your agents think, branch, and coordinate as they work: Claude Code and Codex sessions out of the box, and agents built with **LangGraph**, **Strands Agents**, **Microsoft Agent Framework** and **CrewAI** through framework adapters. [Demo video here](https://www.youtube.com/watch?v=Ud6eDrFN-TA).
 
 ![Agent Flow visualization](https://res.cloudinary.com/dxlvclh9c/image/upload/v1773924941/screenshot_e7yox3.png)
 
@@ -8,23 +8,27 @@ Real-time visualization of Claude Code and Codex agent orchestration. Watch your
 
 I built Agent Flow while developing [CraftMyGame](https://craftmygame.com), a game creation platform driven by AI agents. Debugging agent behavior was painful, so we made it visual. Now we're sharing it.
 
-Claude Code is powerful, but its execution is a black box — you see the final result, not the journey. Agent Flow makes the invisible visible:
+Agent runs are a black box. You see the final result, not the journey. Agent Flow makes the invisible visible:
 
-- **Understand agent behavior** — See how Claude breaks down problems, which tools it reaches for, and how subagents coordinate
-- **Debug tool call chains** — When something goes wrong, trace the exact sequence of decisions and tool calls that led there
-- **See where time is spent** — Identify slow tool calls, unnecessary branching, or redundant work at a glance
-- **Learn by watching** — Build intuition for how to write better prompts by observing how Claude interprets and executes them
+- **Understand agent behavior:** see how an agent breaks down a problem, which tools it reaches for, and how subagents coordinate.
+- **Debug tool call chains:** when something goes wrong, trace the exact sequence of decisions and tool calls that led there.
+- **See the real shape of a workflow:** routing, parallel branches, merges and loops drawn as the graph they are, with live execution state.
+- **See where time is spent:** spot slow tool calls, unnecessary branching or redundant work at a glance.
+- **Learn by watching:** build intuition for writing better prompts by watching how an agent interprets and carries them out.
 
 ## Features
 
-- **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
-- **Claude Code + Codex**: Auto-detects sessions from both runtimes concurrently and shows them side-by-side, or restrict to one via the `agentVisualizer.runtime` setting
-- **Claude Code hooks**: Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
-- **Codex rollout tailing**: Reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and surfaces tool calls, reasoning, and authoritative token counts from Codex's own event stream
-- **Multi-session support**: Track multiple concurrent agent sessions with tabs
-- **Interactive canvas**: Pan, zoom, click agents and tool calls to inspect details
-- **Timeline & transcript panels**: Review the full execution timeline, file attention heatmap, and message transcript
-- **JSONL log file support**: Point at any JSONL event log to replay or watch agent activity
+- **Live agent visualization:** agent execution as an interactive node graph, with real-time tool calls, branching and return flows.
+- **Claude Code and Codex:**
+  - **Auto-detection:** sessions from both runtimes are detected at the same time and shown side by side. You can restrict to one with the `agentVisualizer.runtime` setting.
+  - **Claude Code hooks:** a lightweight HTTP hook server receives events straight from Claude Code, with zero latency.
+  - **Codex rollout tailing:** reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and shows tool calls, reasoning and authoritative token counts from Codex's own event stream.
+- **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/) and [CrewAI](adapters/crewai/) runs into Agent Flow, including nested subagents, agents used as tools, parallel branches and delegation.
+- **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them.
+- **Event logs everywhere:** the VS Code extension and the standalone app can both replay and follow any JSONL event log.
+- **Multi-session support:** track several agent sessions at once, each in its own tab.
+- **Interactive canvas:** pan, zoom, and click agents and tool calls to inspect details.
+- **Timeline and transcript panels:** review the full execution timeline, the file attention heatmap and the message transcript.
 
 ## Getting Started
 
@@ -34,13 +38,13 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 npx agent-flow-app
 ```
 
-This starts the visualizer in your browser. Start a Claude Code session in another terminal — events will stream in real-time.
+This starts the visualizer in your browser. Start a Claude Code session in another terminal, and events stream in real time.
 
 Options:
-- `--port <number>` — change the server port (default: 3001)
-- `--no-open` — don't open the browser automatically
-- `--verbose` — show detailed event logs
-- `--event-log <path>` — also show a JSONL event log, e.g. from the [LangGraph adapter](adapters/langgraph/) (repeatable)
+- `--port <number>`: change the server port (default: 3001)
+- `--no-open`: don't open the browser automatically
+- `--verbose`: show detailed event logs
+- `--event-log <path>`: also show a JSONL event log, such as one written by a [framework adapter](#visualize-agents-built-with-other-frameworks). You can repeat it for several logs. This option needs a build from this repository (see [below](#viewing-an-adapters-log)).
 
 ### Standalone Web App (from source)
 
@@ -52,37 +56,102 @@ pnpm run setup      # configure Claude Code hooks (one-time)
 pnpm run dev        # start the web app + event relay
 ```
 
-Open http://localhost:3000 and start a Claude Code session in another terminal — events will stream to the browser in real-time.
+Open http://localhost:3000 and start a Claude Code session in another terminal. Events stream to the browser in real time.
 
 ### VS Code Extension
 
 1. Install the extension
 2. Open the Command Palette (`Cmd+Shift+P`) and run **Agent Flow: Open Agent Flow**
-3. Start a Claude Code or Codex session in your workspace — Agent Flow will auto-detect it
+3. Start a Claude Code or Codex session in your workspace. Agent Flow detects it automatically.
 
-Agent Flow automatically configures Claude Code hooks the first time you open the panel. To manually reconfigure, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
+Agent Flow configures Claude Code hooks the first time you open the panel. To reconfigure them by hand, run **Agent Flow: Configure Claude Code Hooks** from the Command Palette.
 
 ### Runtime selection
 
-By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) concurrently in all three entry points (VS Code extension, `pnpm run dev`, `npx agent-flow-app`). Sessions are shown side-by-side and tagged by runtime. If you only use one, the other is a harmless no-op — no visible effect, no user action needed.
+By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) in all three entry points: the VS Code extension, `pnpm run dev` and `npx agent-flow-app`. Sessions are shown side by side and tagged by runtime. If you only use one runtime, watching the other has no visible effect and needs no action.
 
 To restrict to one runtime:
 
 - **VS Code extension:** set `agentVisualizer.runtime` to `"auto"` / `"claude"` / `"codex"` in your settings
-- **`pnpm run dev` and `npx agent-flow-app`:** set the `AGENT_FLOW_RUNTIME` environment variable to `claude` or `codex` (defaults to watching both)
+- **`pnpm run dev` and `npx agent-flow-app`:** set the `AGENT_FLOW_RUNTIME` environment variable to `claude` or `codex` (it defaults to watching both)
 
 For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
-### JSONL Event Log
+## Visualize agents built with other frameworks
 
-You can also point Agent Flow at a JSONL event log file. Other agent frameworks can use this route. See the adapters for [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/) and [CrewAI](adapters/crewai/).
+Each adapter is a small Python package in [`adapters/`](adapters/). It uses the framework's own extension points to write Agent Flow's JSONL event format, and Agent Flow follows that file live. Every adapter comes with a demo that needs no API key.
 
-- **VS Code:** set `agentVisualizer.eventLogPath` to the path of a `.jsonl` file
-- **Standalone:** run `npx agent-flow-app --event-log <path>`, or set `AGENT_FLOW_EVENT_LOG=<path>` before `pnpm run dev`. Separate multiple paths with `:` (`;` on Windows)
+| Framework | Package | Attach it | Covers |
+|---|---|---|---|
+| [LangGraph](adapters/langgraph/) | `adapters/langgraph` (Python 3.9+) | `graph.invoke(..., config={"callbacks": [AgentFlowCallbackHandler(path, graph=graph)]})` | Subgraphs as subagents, `Send` fan-out, conditional edges, loops and merges, sync and async |
+| [Strands Agents](adapters/strands/) | `adapters/strands` (Python 3.10+) | `Agent(..., hooks=[flow])` or `flow.instrument(graph_or_swarm)` | Agents as tools, `Graph` (parallel batches, conditional edges, nested graphs), `Swarm` handoffs |
+| [Microsoft Agent Framework](adapters/agent-framework/) | `adapters/agent-framework` (Python 3.10+) | `Agent(..., middleware=flow.middleware)` or `flow.instrument(workflow)` | Agents as tools (including concurrent runs), streaming, workflows with switch-case, fan-out and fan-in, loops and nested workflows |
+| [CrewAI](adapters/crewai/) | `adapters/crewai` (Python 3.10–3.13) | `listener = AgentFlowListener(path)`; nothing to attach | Crews (async tasks, `context`, hierarchical delegation), Flows (`and_` / `or_`, router loops), crews started from Flow methods |
 
-Agent Flow replays the file and then follows it as events are added. In the standalone app each log gets its own session tab, and truncating the file starts a fresh session.
+For example, with CrewAI:
 
-Runtimes built on node graphs (e.g. LangGraph, Strands Graphs and Swarms, Agent Framework workflows, or CrewAI crews and flows) can also report their graph shape. The **Graph** panel (top bar, or `N`) then draws the actual nodes, routes, loops and merges, with live execution state, next to the agent tree.
+```bash
+pip install -e adapters/crewai
+python adapters/crewai/examples/launch_flow_demo.py --out /tmp/agent-flow.jsonl
+```
+
+The demos:
+
+| Adapter | Demo | What it shows |
+|---|---|---|
+| LangGraph | `examples/deep_orchestration_demo.py` | 17 agents: 3 parallel research teams, each fanning out to 3 specialists; a nested writer; two review loops |
+| Strands | `examples/orchestration_demo.py` | 19 agents: a Graph with a nested Graph, a Swarm and agents as tools running in parallel, then a review loop |
+| Agent Framework | `examples/incident_response_demo.py` | 12 agents: switch-case triage, 3 parallel analysts, a nested remediation workflow that loops back |
+| CrewAI | `examples/launch_flow_demo.py` | 14 agents: parallel Flow branches, async tasks, a hierarchical crew with delegation, a router loop |
+
+Each adapter's README has the full mapping and its caveats.
+
+### Viewing an adapter's log
+
+- **Standalone, from source:** run `AGENT_FLOW_EVENT_LOG=/tmp/agent-flow.jsonl pnpm run dev` and open http://localhost:3000. Or build the app and pass the log directly:
+  ```bash
+  pnpm run build:app
+  node app/dist/app.js --event-log /tmp/agent-flow.jsonl
+  ```
+- **VS Code:** set `agentVisualizer.eventLogPath` to the log's path.
+
+Agent Flow replays the file and then follows it as events are added, so you can open it before, during or after a run. In the standalone app each log gets its own session tab, labeled with the run's prompt, and truncating the file starts a fresh session. Every adapter can truncate the file for you, with `truncate=True`. Separate several paths in `AGENT_FLOW_EVENT_LOG` with `:` (`;` on Windows). The adapters also read `AGENT_FLOW_EVENT_LOG` as their default output path, so setting it once in your shell connects both ends.
+
+## Graph panel
+
+Press **Graph** in the top bar (it appears when a session has graph data) or `N` to see a workflow as the graph it really is, next to the agent tree:
+
+- **Layout:** nodes run top to bottom from START to END. Loops are drawn as arcs on the side of the node they leave from. Parallel branches sit side by side above the node where they merge.
+- **Routes:** routes taken are bright. Routes declared but not taken are dim. Dashed edges are conditional: routers, switch-cases, conditional edges.
+- **Counts:** `×N` on a node is how many times it ran, and `×N` on an edge is how many times that hop was taken.
+- **Live state:** the node running right now pulses amber, the hop just taken animates, and failed nodes are red.
+- **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
+- **Replay:** scrubbing the timeline replays the graph state too.
+
+## JSONL event format
+
+To add another framework, write one JSON object per line:
+
+```json
+{"time": 1.25, "type": "tool_call_start", "payload": {"agent": "researcher", "tool": "web_search", "args": "{\"q\": \"...\"}"}}
+```
+
+`time` is seconds since the run started. The event types, as the adapters use them:
+
+| Type | Payload |
+|---|---|
+| `agent_spawn` | `name`, `isMain` or `parent`, `task` |
+| `agent_complete` | `name` |
+| `subagent_dispatch` / `subagent_return` | `parent`, `child`, `task` / `summary` |
+| `message` | `agent`, `content`, `role` (`user`, `thinking` or omitted for the assistant) |
+| `tool_call_start` / `tool_call_end` | `agent`, `tool`, `args`, `inputData` / `result`, `isError`, `errorMessage` |
+| `model_detected` | `agent`, `model` |
+| `context_update` | `agent`, `tokens` |
+| `graph_structure` | `agent`, `nodes: [{id, label, kind: start\|end\|node\|subgraph, child?}]`, `edges: [{source, target, conditional, label?}]`. A later structure for the same agent merges into it. |
+| `node_start` | `agent`, `node`, `step`, `from: [source nodes]` |
+| `node_end` | `agent`, `node`, `step`, `error?` |
+
+The graph events are optional. Without them, the canvas still shows agents, tools and messages. See [extension/src/protocol.ts](extension/src/protocol.ts) and [web/hooks/simulation/](web/hooks/simulation/) for how each event is handled.
 
 ## Commands
 
@@ -93,11 +162,23 @@ Runtimes built on node graphs (e.g. LangGraph, Strands Graphs and Swarms, Agent 
 | `Agent Flow: Connect to Running Agent` | Manually connect to an agent session |
 | `Agent Flow: Configure Claude Code Hooks` | Set up Claude Code hooks for live streaming |
 
-## Keyboard Shortcut
+## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Cmd+Alt+A` (Mac) / `Ctrl+Alt+A` (Win/Linux) | Open Agent Flow |
+| `Cmd+Alt+A` (Mac) / `Ctrl+Alt+A` (Win/Linux) | Open Agent Flow (VS Code) |
+| `Space` | Play / pause |
+| `N` | Graph panel |
+| `T` | Timeline |
+| `C` | Session transcript |
+| `f` | File attention |
+| `$` | Cost overlay |
+| `S` | Stats |
+| `G` | Hex grid |
+| `M` | Mute |
+| `Shift+F` | Zoom to fit |
+| `1` – `4` | Playback speed 0.5× / 1× / 2× / 4× |
+| `Esc` | Clear selection |
 
 ## Settings
 
@@ -108,12 +189,22 @@ Runtimes built on node graphs (e.g. LangGraph, Strands Graphs and Swarms, Agent 
 | `agentVisualizer.eventLogPath` | `""` | Path to a JSONL event log file to watch |
 | `agentVisualizer.autoOpen` | `false` | Auto-open when an agent session starts |
 
+Environment variables for the standalone app and dev relay:
+
+| Variable | Description |
+|---|---|
+| `AGENT_FLOW_RUNTIME` | `claude` or `codex` to watch only one runtime |
+| `AGENT_FLOW_EVENT_LOG` | JSONL event log(s) to follow; also the adapters' default output path |
+| `CODEX_HOME` | Non-default Codex install location |
+| `AGENT_FLOW_TELEMETRY` / `DO_NOT_TRACK` | Turn telemetry off (see [Privacy & Telemetry](#privacy--telemetry)) |
+
 ## Requirements
 
 - [Node.js](https://nodejs.org/) 20+ (LTS recommended)
 - [pnpm](https://pnpm.io/)
-- Claude Code CLI
+- Claude Code CLI, for Claude Code sessions
 - For the VS Code extension: a VSCode-compatible IDE 1.85+ (e.g. [VS Code](https://code.visualstudio.com/), [Cursor](https://cursor.sh/), [Windsurf](https://windsurf.com/))
+- For the framework adapters: Python 3.9+ for LangGraph, 3.10+ for Strands and Agent Framework, and 3.10–3.13 for CrewAI
 
 ## Development
 
@@ -123,7 +214,7 @@ pnpm run setup      # configure Claude Code hooks (one-time)
 pnpm run dev        # start dev server + event relay
 ```
 
-`pnpm run dev` starts both the Next.js dev server and an event relay that receives Claude Code events and streams them to the browser via SSE.
+`pnpm run dev` starts both the Next.js dev server and an event relay. The relay receives Claude Code events, follows any `AGENT_FLOW_EVENT_LOG` files, and streams everything to the browser via SSE.
 
 Other scripts:
 
@@ -136,6 +227,25 @@ Other scripts:
 | `pnpm run build:web` | Build the Next.js web app |
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
+| `pnpm run build:app` | Build the standalone app into `app/dist/` |
+| `pnpm test` | Relay, event log, graph layout and graph event tests |
+
+Each adapter has its own tests, which run offline against fake models:
+
+```bash
+pip install -e 'adapters/<adapter>[dev]'
+pytest adapters/<adapter>/tests
+```
+
+Repository layout:
+
+| Path | Contents |
+|---|---|
+| `extension/` | VS Code extension, Claude Code and Codex watchers, event protocol |
+| `web/` | The visualizer UI (canvas, panels, Graph panel and layout) |
+| `app/` | Standalone `agent-flow-app` server |
+| `scripts/` | Event relay, event log watcher, setup, telemetry, and their tests |
+| `adapters/` | Framework adapters for LangGraph, Strands Agents, Microsoft Agent Framework and CrewAI |
 
 ## Star History
 
@@ -154,6 +264,8 @@ extension emit nothing. Only aggregate events are sent — session count,
 duration, event count, OS/arch, Agent Flow version, distinct model IDs
 observed, which runtimes were watched, and error class names. Prompts, file
 paths, tool calls, user info, and environment variables are never sent.
+The framework adapters send nothing anywhere; they only write the local
+event log you give them.
 
 - **Turn off:** `export AGENT_FLOW_TELEMETRY=false` or `export DO_NOT_TRACK=1`
   (disabled installs write zero state to disk — no `~/.agent-flow/` directory)
