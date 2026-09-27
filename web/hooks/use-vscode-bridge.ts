@@ -33,6 +33,10 @@ interface BridgeHookResult {
   sessionsWithActivity: Set<string>
   /** Remove a session from the list */
   removeSession: (sessionId: string) => void
+  /** Every session's buffered events (read-only) */
+  sessionEvents: ReadonlyMap<string, readonly SimulationEvent[]>
+  /** Changes (throttled) as any session's buffer grows */
+  sessionEventsVersion: number
 }
 
 /**
@@ -58,6 +62,17 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const selectedSessionIdRef = useRef<string | null>(null)
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
+  // Bumped (at most every 500 ms) as any session's buffer grows, for views
+  // that aggregate across sessions
+  const [sessionEventsVersion, setSessionEventsVersion] = useState(0)
+  const versionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bumpSessionEvents = useCallback(() => {
+    if (versionTimerRef.current) return
+    versionTimerRef.current = setTimeout(() => {
+      versionTimerRef.current = null
+      setSessionEventsVersion(v => v + 1)
+    }, 500)
+  }, [])
   /** True while a session switch is pending (between auto-select and useLayoutEffect).
    *  Prevents the animation frame from processing events in the wrong simulation context. */
   const sessionSwitchPendingRef = useRef(false)
@@ -124,6 +139,7 @@ export function useVSCodeBridge(): BridgeHookResult {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
         sessionEventsRef.current.set(event.sessionId, buf)
+        bumpSessionEvents()
       }
 
       // Deliver to pending if session matches (ref is always current).
@@ -315,5 +331,8 @@ export function useVSCodeBridge(): BridgeHookResult {
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,
+    /** Every session's buffered events (read-only), and a counter that changes as they grow */
+    sessionEvents: sessionEventsRef.current as ReadonlyMap<string, readonly SimulationEvent[]>,
+    sessionEventsVersion,
   }
 }

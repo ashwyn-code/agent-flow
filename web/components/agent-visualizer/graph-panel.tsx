@@ -5,6 +5,7 @@ import { Z, type Agent, type AgentGraph, type GraphNodeInfo, type SimulationEven
 import { COLORS } from '@/lib/colors'
 import { layoutGraph, type LayoutEdge, type LayoutNode } from '@/lib/graph-layout'
 import { analyzeRun, type NodeMetrics } from '@/lib/run-analysis'
+import { aggregateGraph, type GraphAggregate } from '@/lib/multi-run'
 import { formatTokens } from '@/lib/utils'
 import { agentCost } from './canvas/draw-cost'
 import { PanelHeader, SlidingPanel, stopPropagationHandlers } from './shared-ui'
@@ -26,7 +27,7 @@ const OVERLAYS: { id: GraphOverlay; label: string; color: string; title: string 
   { id: 'errors', label: 'Errors', color: COLORS.error, title: 'Failed tool calls and node errors' },
 ]
 
-interface OverlayCell { value: number; text: string; heat: number; color: string }
+interface OverlayCell { value: number; text: string; heat: number; color: string; detail?: string }
 
 function metricValue(m: NodeMetrics, overlay: GraphOverlay): number {
   switch (overlay) {
@@ -64,12 +65,46 @@ export function overlayCells(metrics: Map<string, NodeMetrics> | undefined, over
   return cells
 }
 
+/** Cells for the all-runs view: what the node does across runs. */
+export function aggregateCells(agg: GraphAggregate, overlay: GraphOverlay): Map<string, OverlayCell> {
+  const cells = new Map<string, OverlayCell>()
+  const color = OVERLAYS.find(o => o.id === overlay)!.color
+  const value = (n: NonNullable<ReturnType<GraphAggregate['nodes']['get']>>) =>
+    overlay === 'time' ? n.timeP95 : overlay === 'tokens' ? n.tokensP50 : overlay === 'cost' ? n.costMean : overlay === 'errors' ? n.errorShare : n.share
+  let max = 0
+  for (const [id, n] of agg.nodes) if (id !== '__start__' && id !== '__end__') max = Math.max(max, value(n))
+  for (const [id, n] of agg.nodes) {
+    if (id === '__start__' || id === '__end__') continue
+    const v = value(n)
+    if (v === 0 && overlay !== 'time' && overlay !== 'runs') continue
+    const text = overlay === 'time' ? `${formatMetric(n.timeP50, 'time')}/${formatMetric(n.timeP95, 'time')}`
+      : overlay === 'tokens' ? formatMetric(n.tokensP50, 'tokens')
+      : overlay === 'cost' ? `${formatMetric(n.costMean, 'cost')}/run`
+      : overlay === 'errors' ? `${Math.round(n.errorShare * 100)}% err`
+      : `${Math.round(n.share * 100)}%`
+    const detail = [
+      `ran in ${Math.round(n.share * 100)}% of ${agg.runs} runs`,
+      `time: median ${formatMetric(n.timeP50, 'time')} · p95 ${formatMetric(n.timeP95, 'time')}`,
+      n.tokensP50 ? `tokens: median ${formatMetric(n.tokensP50, 'tokens')}` : null,
+      n.costMean ? `cost: ${formatMetric(n.costMean, 'cost')} per run` : null,
+      n.errorRuns ? `errors in ${n.errorRuns} run${n.errorRuns === 1 ? '' : 's'} (${Math.round(n.errorShare * 100)}%)` : null,
+    ].filter(Boolean).join('\n')
+    cells.set(id, { value: v, text, heat: max > 0 ? v / max : 0, color, detail })
+  }
+  return cells
+}
+
+type Scope = 'run' | 'all'
+
 interface GraphPanelProps {
   visible: boolean
   graphs: Map<string, AgentGraph>
   agents: Map<string, Agent>
   /** The session's events, for the metric overlays */
   events?: readonly SimulationEvent[]
+  /** Every session's events, for the all-runs view */
+  sessionEvents?: ReadonlyMap<string, readonly SimulationEvent[]>
+  sessionEventsVersion?: number
   selectedAgentId: string | null
   currentTime: number
   isPlaying: boolean
@@ -119,18 +154,34 @@ function childGraphFor(graphs: Map<string, AgentGraph>, agents: Map<string, Agen
 }
 
 export const GraphPanel = memo(function GraphPanel({
-  visible, graphs, agents, events, selectedAgentId, currentTime, isPlaying, onAgentClick, onClose,
+  visible, graphs, agents, events, sessionEvents, sessionEventsVersion, selectedAgentId, currentTime, isPlaying, onAgentClick, onClose,
 }: GraphPanelProps) {
   const agentId = visible ? pickGraphAgent(graphs, agents, selectedAgentId) : null
-  const graph = agentId ? graphs.get(agentId) ?? null : null
-  const layout = useMemo(() => (graph ? layoutGraph(graph) : null), [graph])
+  const runGraph = agentId ? graphs.get(agentId) ?? null : null
   const now = useSimulationClock(currentTime, isPlaying && visible)
   const [overlay, setOverlay] = useState<GraphOverlay>('runs')
+  const [scope, setScope] = useState<Scope>('run')
+
+  // Every run of this graph the UI has seen (sessions, and parallel instances)
+  const aggregate = useMemo(
+    () => (visible && runGraph && sessionEvents ? aggregateGraph(sessionEvents.values(), runGraph.agent, { costOf: agentCost }) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute when any session's events grow, not on every render of this run's graph
+    [visible, runGraph?.agent, sessionEvents, sessionEventsVersion],
+  )
+  const allRuns = scope === 'all' && aggregate !== null && aggregate.runs > 1
+  const graph = allRuns ? aggregate!.graph : runGraph
+  const layout = useMemo(() => (graph ? layoutGraph(graph) : null), [graph])
+  const edgeShares = useMemo(
+    () => (allRuns ? new Map([...aggregate!.edges].map(([id, e]) => [id, e.share])) : undefined),
+    [allRuns, aggregate],
+  )
   const cells = useMemo(() => {
-    if (!visible || !graph || overlay === 'runs' || !events) return new Map<string, OverlayCell>()
+    if (!visible || !graph) return new Map<string, OverlayCell>()
+    if (allRuns) return aggregateCells(aggregate!, overlay)
+    if (overlay === 'runs' || !events) return new Map<string, OverlayCell>()
     const metrics = analyzeRun(events, currentTime, { costOf: agentCost }).nodeMetrics.get(graph.agent)
     return overlayCells(metrics, overlay)
-  }, [visible, graph, overlay, events, currentTime])
+  }, [visible, graph, allRuns, aggregate, overlay, events, currentTime])
 
   if (!visible) return null
 
@@ -174,6 +225,26 @@ export const GraphPanel = memo(function GraphPanel({
           </div>
         ) : (
           <>
+            {aggregate && aggregate.runs > 1 && (
+              <div className="flex items-center gap-1 mb-1.5 text-[9px] font-mono" role="group" aria-label="Scope">
+                {([['run', 'This run'], ['all', `All runs (${aggregate.runs})`]] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setScope(id)}
+                    className="px-1.5 py-0.5 rounded"
+                    title={id === 'all' ? `Every run of ${aggregate.name} seen in ${aggregate.sessions} session${aggregate.sessions === 1 ? '' : 's'}` : 'The selected session'}
+                    style={{
+                      color: scope === id ? COLORS.holoHot : COLORS.textMuted,
+                      border: `1px solid ${scope === id ? COLORS.holoBase : COLORS.holoBorder06}`,
+                      background: scope === id ? COLORS.holoBg10 : 'transparent',
+                    }}
+                    aria-pressed={scope === id}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             {events && (
               <div className="flex items-center gap-1 mb-2 text-[9px] font-mono" role="group" aria-label="Color nodes by">
                 {OVERLAYS.map(o => (
@@ -199,6 +270,7 @@ export const GraphPanel = memo(function GraphPanel({
                 graph={graph}
                 layout={layout}
                 cells={cells}
+                edgeShares={edgeShares}
                 currentTime={now}
                 onOpenSubgraph={(node) => {
                   const child = subgraphOf(graphs, agents, graph.agent, node)
@@ -207,7 +279,7 @@ export const GraphPanel = memo(function GraphPanel({
                 canOpen={(node) => subgraphOf(graphs, agents, graph.agent, node) !== null}
               />
             </div>
-            <GraphFooter graph={graph} layout={layout} overlay={overlay} cells={cells} />
+            <GraphFooter graph={graph} layout={layout} overlay={overlay} cells={cells} aggregate={allRuns ? aggregate! : undefined} />
           </>
         )}
       </div>
@@ -244,12 +316,14 @@ interface GraphSvgProps {
   graph: AgentGraph
   layout: NonNullable<ReturnType<typeof layoutGraph>>
   cells: Map<string, OverlayCell>
+  /** All-runs view: share of runs that took each edge */
+  edgeShares?: Map<string, number>
   currentTime: number
   onOpenSubgraph: (node: GraphNodeInfo) => void
   canOpen: (node: GraphNodeInfo) => boolean
 }
 
-function GraphSvg({ graph, layout, cells, currentTime, onOpenSubgraph, canOpen }: GraphSvgProps) {
+function GraphSvg({ graph, layout, cells, edgeShares, currentTime, onOpenSubgraph, canOpen }: GraphSvgProps) {
   const edges = Object.values(graph.edges)
   // Draw untaken edges first so taken routes sit on top
   const ordered = [...edges].sort((a, b) => Math.min(1, a.traversals) - Math.min(1, b.traversals))
@@ -279,8 +353,8 @@ function GraphSvg({ graph, layout, cells, currentTime, onOpenSubgraph, canOpen }
       {ordered.map(edge => {
         const geo = layout.edges.get(edge.id)
         if (!geo) return null
-        const hot = edge.lastTime !== undefined && currentTime >= edge.lastTime && currentTime - edge.lastTime < HOT_HOP_S
-        return <GraphEdgePath key={edge.id} geo={geo} traversals={edge.traversals} conditional={edge.conditional} hot={hot} label={edge.label} />
+        const hot = !edgeShares && edge.lastTime !== undefined && currentTime >= edge.lastTime && currentTime - edge.lastTime < HOT_HOP_S
+        return <GraphEdgePath key={edge.id} geo={geo} traversals={edge.traversals} conditional={edge.conditional} hot={hot} label={edge.label} share={edgeShares ? edgeShares.get(edge.id) ?? 0 : undefined} />
       })}
 
       {graph.order.map(id => {
@@ -294,6 +368,7 @@ function GraphSvg({ graph, layout, cells, currentTime, onOpenSubgraph, canOpen }
             node={node}
             box={box}
             cell={cells.get(id)}
+            aggregate={!!edgeShares}
             openable={openable}
             onOpen={openable ? () => onOpenSubgraph(node) : undefined}
           />
@@ -303,13 +378,17 @@ function GraphSvg({ graph, layout, cells, currentTime, onOpenSubgraph, canOpen }
   )
 }
 
-function GraphEdgePath({ geo, traversals, conditional, hot, label }: {
+function GraphEdgePath({ geo, traversals, conditional, hot, label, share }: {
   geo: LayoutEdge; traversals: number; conditional: boolean; hot: boolean; label?: string
+  /** All-runs view: share of runs that took this edge */
+  share?: number
 }) {
-  const taken = traversals > 0
+  const taken = share !== undefined ? share > 0 : traversals > 0
   const stroke = hot ? COLORS.holoBright : taken ? COLORS.holoBase : COLORS.textMuted
-  const width = taken ? Math.min(3.5, 1.4 + Math.log2(traversals)) : 1
-  const title = `${taken ? `taken ${traversals}×` : 'not taken'}${conditional ? ' · conditional' : ''}${geo.kind === 'back' || geo.kind === 'self' ? ' · loop' : ''}${label ? ` · ${label}` : ''}`
+  const width = share !== undefined ? (taken ? 1 + 2.6 * share : 1) : taken ? Math.min(3.5, 1.4 + Math.log2(traversals)) : 1
+  const takenText = share !== undefined ? `taken in ${Math.round(share * 100)}% of runs (${traversals}× in all)` : `taken ${traversals}×`
+  const title = `${taken ? takenText : 'not taken'}${conditional ? ' · conditional' : ''}${geo.kind === 'back' || geo.kind === 'self' ? ' · loop' : ''}${label ? ` · ${label}` : ''}`
+  const badge = share !== undefined ? (taken && share < 1 ? `${Math.round(share * 100)}%` : null) : traversals > 1 ? `×${traversals}` : null
 
   return (
     <g>
@@ -324,21 +403,21 @@ function GraphEdgePath({ geo, traversals, conditional, hot, label }: {
         className={hot ? 'af-graph-hot' : undefined}
         markerEnd={`url(#af-arrow-${hot ? 'hot' : taken ? 'lit' : 'dim'})`}
       />
-      {traversals > 1 && (
+      {badge && (
         <g transform={`translate(${geo.labelX}, ${geo.labelY})`}>
-          <rect x={-11} y={-7} width={22} height={14} rx={7} fill={COLORS.void} stroke={stroke} strokeOpacity={0.6} />
-          <text textAnchor="middle" dominantBaseline="central" fontSize={8} fill={COLORS.holoBright}>×{traversals}</text>
+          <rect x={-13} y={-7} width={26} height={14} rx={7} fill={COLORS.void} stroke={stroke} strokeOpacity={0.6} />
+          <text textAnchor="middle" dominantBaseline="central" fontSize={8} fill={COLORS.holoBright}>{badge}</text>
         </g>
       )}
     </g>
   )
 }
 
-function GraphNodeBox({ node, box, cell, openable, onOpen }: {
-  node: GraphNodeInfo; box: LayoutNode; cell?: OverlayCell; openable: boolean; onOpen?: () => void
+function GraphNodeBox({ node, box, cell, aggregate, openable, onOpen }: {
+  node: GraphNodeInfo; box: LayoutNode; cell?: OverlayCell; aggregate?: boolean; openable: boolean; onOpen?: () => void
 }) {
   const visited = node.visits > 0
-  const running = node.running > 0
+  const running = !aggregate && node.running > 0
   const terminal = node.kind === 'start' || node.kind === 'end'
   const stroke = node.error ? COLORS.error
     : running ? COLORS.tool_calling
@@ -349,13 +428,15 @@ function GraphNodeBox({ node, box, cell, openable, onOpen }: {
   const title = [
     node.label,
     node.kind === 'subgraph' ? (openable ? 'subgraph — click to open' : 'subgraph (not run yet)') : null,
-    visited ? `ran ${node.visits}×${node.lastStep !== undefined ? ` · last step ${node.lastStep}` : ''}` : 'not run',
+    aggregate ? (visited ? null : 'never ran') : visited ? `ran ${node.visits}×${node.lastStep !== undefined ? ` · last step ${node.lastStep}` : ''}` : 'not run',
     running ? 'running now' : null,
     node.declared ? null : 'observed at runtime (not in declared graph)',
     node.error ? `error: ${node.error}` : null,
-    cell ? `${cell.text}${cell.heat < 1 ? ` · ${Math.round(cell.heat * 100)}% of the top node` : ' · the top node'}` : null,
+    cell?.detail ?? (cell ? `${cell.text}${cell.heat < 1 ? ` · ${Math.round(cell.heat * 100)}% of the top node` : ' · the top node'}` : null),
   ].filter(Boolean).join('\n')
   const pillW = cell ? cell.text.length * 5 + 8 : 0
+  // Wide pills sit centered over the node so they don't cover its neighbors
+  const pillX = pillW > box.w * 0.6 ? (box.w - pillW) / 2 : box.w - pillW + 4
 
   return (
     <g
@@ -395,14 +476,14 @@ function GraphNodeBox({ node, box, cell, openable, onOpen }: {
         {node.kind === 'subgraph' ? ' ▸' : ''}
       </text>
       {/* Visit count on the left corner: loops leave from the right side */}
-      {node.visits > 1 && !terminal && (
+      {node.visits > 1 && !terminal && !aggregate && (
         <g transform={`translate(2, 0)`}>
           <circle r={8} fill={COLORS.void} stroke={stroke} strokeWidth={1} />
           <text textAnchor="middle" dominantBaseline="central" fontSize={7.5} fill={COLORS.textPrimary}>×{node.visits}</text>
         </g>
       )}
       {cell && !terminal && (
-        <g transform={`translate(${box.w - pillW + 4}, ${-6})`}>
+        <g transform={`translate(${pillX}, ${-6})`}>
           <rect width={pillW} height={12} rx={6} fill={COLORS.void} stroke={cell.color} strokeOpacity={0.8} />
           <text x={pillW / 2} y={6} textAnchor="middle" dominantBaseline="central" fontSize={7.5} fill={cell.color}>{cell.text}</text>
         </g>
@@ -418,8 +499,9 @@ function truncateLabel(label: string, width: number): string {
 
 // ─── Footer ──────────────────────────────────────────────────────────────────
 
-function GraphFooter({ graph, layout, overlay, cells }: {
+function GraphFooter({ graph, layout, overlay, cells, aggregate }: {
   graph: AgentGraph; layout: NonNullable<ReturnType<typeof layoutGraph>>; overlay: GraphOverlay; cells: Map<string, OverlayCell>
+  aggregate?: GraphAggregate
 }) {
   let top: [string, OverlayCell] | null = null
   let total = 0
@@ -437,17 +519,29 @@ function GraphFooter({ graph, layout, overlay, cells }: {
   return (
     <div className="mt-2 pt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-mono" style={{ borderTop: `1px solid ${COLORS.holoBorder06}`, color: COLORS.textMuted }}>
       <span style={{ color: COLORS.textDim }}>
-        {ran}/{real.length} nodes · {graph.totalHops} hops · step {graph.lastStep}{loops > 0 ? ` · ${loops} loop${loops === 1 ? '' : 's'}` : ''}
+        {aggregate
+          ? `${aggregate.runs} runs · ${aggregate.sessions} session${aggregate.sessions === 1 ? '' : 's'} · ${ran}/${real.length} nodes ever ran`
+          : `${ran}/${real.length} nodes · ${graph.totalHops} hops · step ${graph.lastStep}${loops > 0 ? ` · ${loops} loop${loops === 1 ? '' : 's'}` : ''}`}
       </span>
       <span className="flex-1" />
       <LegendLine color={COLORS.holoBase} width={2} label="taken" />
       <LegendLine color={COLORS.textMuted} width={1} label="not taken" />
       <LegendLine color={COLORS.textMuted} width={1} dashed label="conditional" />
-      <span className="flex items-center gap-1">
-        <svg width={10} height={10}><rect x={1} y={1} width={8} height={8} rx={2} fill="none" stroke={COLORS.tool_calling} strokeWidth={1.5} /></svg>
-        running
-      </span>
-      {overlay !== 'runs' && (
+      {!aggregate && (
+        <span className="flex items-center gap-1">
+          <svg width={10} height={10}><rect x={1} y={1} width={8} height={8} rx={2} fill="none" stroke={COLORS.tool_calling} strokeWidth={1.5} /></svg>
+          running
+        </span>
+      )}
+      {aggregate && (
+        <span className="w-full" style={{ color: COLORS.textDim }}>
+          {top
+            ? overlay === 'runs' ? <>Edges and nodes show the share of runs that took them.</>
+              : <>{overlay === 'time' ? 'Slowest (median/p95)' : overlay === 'errors' ? 'Fails most often' : overlay === 'cost' ? 'Costliest per run' : 'Most tokens (median)'}: <span style={{ color: top[1].color }}>{top[0]}</span> {top[1].text}</>
+            : `No ${overlay} recorded for these nodes.`}
+        </span>
+      )}
+      {!aggregate && overlay !== 'runs' && (
         <span className="w-full" style={{ color: COLORS.textDim }}>
           {top && total > 0
             ? <>Most {overlay === 'errors' ? 'errors' : overlay}: <span style={{ color: top[1].color }}>{top[0]}</span> {top[1].text}{cells.size > 1 ? ` (${Math.round((top[1].value / total) * 100)}% of all nodes)` : ''}</>

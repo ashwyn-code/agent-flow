@@ -31,7 +31,7 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
   - **Codex rollout tailing:** reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and shows tool calls, reasoning and authoritative token counts from Codex's own event stream.
 - **Framework adapters:** Python packages that stream [LangGraph](adapters/langgraph/), [Strands Agents](adapters/strands/), [Microsoft Agent Framework](adapters/agent-framework/), [CrewAI](adapters/crewai/), the [OpenAI Agents SDK](adapters/openai-agents/) and [Google ADK](adapters/google-adk/) runs into Agent Flow, including nested subagents, agents used as tools, handoffs, parallel branches and delegation.
 - **OpenTelemetry import:** an OTLP/HTTP endpoint (`/v1/traces`) and an OTLP file reader turn production traces from OpenTelemetry SDKs, Collectors and OpenInference instrumentations into the same live view, graphs included.
-- **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors.
+- **Graph panel:** draws a workflow's actual nodes and edges, including conditional routes, loops, parallel branches and merges. Nodes that are subgraphs open their own graph when you click them. Overlays color the nodes by time, tokens, cost or errors, for one run or across every run of the graph (how often each route is taken, median and p95 node times, error rates).
 - **Canvas signals:** a context gauge ring on every agent that turns amber and red near the limit and flashes when context is compacted; red ripples on failures; retry arcs with attempt badges; guardrail checks as shields that pass or trip.
 - **Models and cost:** each agent's outer ring is tinted by its model, and the Models legend totals agents, tokens and estimated cost per model for the whole run. Hover a model to spotlight its agents.
 - **Swimlane timeline with critical path:** one lane per agent with every tool call, parallel calls stacked, and the chain of work that set the run's duration highlighted.
@@ -152,6 +152,7 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 - **Live state:** the node running right now pulses amber, the hop just taken animates, and failed nodes are red.
 - **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, a nested ADK workflow agent, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
 - **Metric overlays:** the Runs / Time / Tokens / Cost / Errors switch colors each node by how much of that it accounts for, labels it with the value, and names the top node in the footer. Time is summed over a node's runs. Tokens, cost and errors include the subagents the node ran. Cost uses the same per-model estimate as the `$Cost` view.
+- **All runs:** once the same graph has run more than once, a **This run / All runs** switch appears. All runs folds every run the UI has seen into one graph. Each OpenTelemetry trace, adapter run or ingest sender is a session, and parallel instances of a subgraph (`research_team #2`) each count as a run. Edges show the share of runs that took them, and never-taken routes stay dim. The overlays switch to per-run figures: share of runs visited, median/p95 time, median tokens, cost per run, and the share of runs with errors. Hover a node for all of them. Loading a trace file with `--otel-file` gives you this view over a whole batch of production runs.
 - **Replay:** scrubbing the timeline replays the graph state, and the overlays, too.
 
 ## Execution timeline
@@ -340,7 +341,7 @@ Other scripts:
 | `pnpm run build:extension` | Build the extension |
 | `pnpm run build:webview` | Build the webview assets |
 | `pnpm run build:app` | Build the standalone app into `app/dist/` |
-| `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout, graph event and run analysis tests |
+| `pnpm test` | Relay, event log, ingest, OpenTelemetry import, graph layout, graph event, run analysis and UI logic tests |
 | `pnpm otel:import <file>` | Convert OTLP JSON traces into Agent Flow JSONL event logs |
 
 Each adapter has its own tests, which run offline against fake models. The shared event sink has tests too (`pytest adapters/_shared/tests`), and `python adapters/sync_sink.py --check` verifies every adapter's copy of it:
