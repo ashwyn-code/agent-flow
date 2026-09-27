@@ -188,6 +188,9 @@ export interface GraphNodeInfo {
   error?: string
   /** Declared by graph_structure (vs. only observed at runtime) */
   declared: boolean
+  /** Agent whose graph this node opens, when it isn't named after the node
+   *  (e.g. a CrewAI Flow method that kicks off a differently named crew) */
+  child?: string
 }
 
 export interface GraphEdgeInfo {

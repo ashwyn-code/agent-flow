@@ -51,11 +51,13 @@ export function handleGraphStructure(payload: Record<string, unknown>, state: Mu
     if (!id) continue
     const kind = typeof r.kind === 'string' && NODE_KINDS.has(r.kind) ? r.kind as GraphNodeKind : defaultKind(id)
     const label = asString(r.label, id) || id
+    const child = typeof r.child === 'string' && r.child ? r.child : undefined
     const existing = graph.nodes[id]
     if (existing) {
-      graph.nodes[id] = { ...existing, kind, label, declared: true }
+      // A later structure (e.g. a patch linking a node to its child) keeps what it doesn't restate
+      graph.nodes[id] = { ...existing, kind, label, declared: true, ...(child ? { child } : {}) }
     } else {
-      graph.nodes[id] = newNode(id, kind, label, true)
+      graph.nodes[id] = { ...newNode(id, kind, label, true), ...(child ? { child } : {}) }
       graph.order.push(id)
     }
   }

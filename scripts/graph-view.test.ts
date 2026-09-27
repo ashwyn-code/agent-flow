@@ -205,3 +205,15 @@ test('a loop leaving a left-hand node is routed on the left, clear of its siblin
   assert.ok(loop.labelX < security.x, 'loop lane is left of the security node')
   assert.ok(Math.min(...[...layout.nodes.values()].map(n => n.x)) > 0, 'room was made for the left lane')
 })
+
+test('a structure patch links a node to a differently named child graph', () => {
+  const graph = run([
+    ['graph_structure', { agent: 'flow', nodes: [{ id: 'research', label: 'research', kind: 'node' }], edges: [] }],
+    ['node_start', { agent: 'flow', node: 'research', step: 1, from: ['__start__'] }],
+    ['graph_structure', { agent: 'flow', nodes: [{ id: 'research', label: 'research', kind: 'subgraph', child: 'research_crew' }], edges: [] }],
+  ]).graphs.get('flow')!
+  assert.equal(graph.nodes.research.kind, 'subgraph')
+  assert.equal(graph.nodes.research.child, 'research_crew')
+  assert.equal(graph.nodes.research.visits, 1)  // execution history survives the patch
+  assert.deepEqual(graph.order, ['research', '__start__'])
+})

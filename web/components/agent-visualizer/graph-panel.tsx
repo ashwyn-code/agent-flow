@@ -41,6 +41,12 @@ export function pickGraphAgent(graphs: Map<string, AgentGraph>, agents: Map<stri
   return graphs.keys().next().value ?? null
 }
 
+/** Graph a subgraph node opens: its explicit child link, else the child agent named after it. */
+function subgraphOf(graphs: Map<string, AgentGraph>, agents: Map<string, Agent>, parentId: string, node: GraphNodeInfo): string | null {
+  if (node.child && graphs.has(node.child)) return node.child
+  return childGraphFor(graphs, agents, parentId, node.label)
+}
+
 /**
  * Subagent graph behind a subgraph node (parallel runs are named "node #2", ...).
  * Prefers one still running, else the most recently started.
@@ -112,11 +118,11 @@ export const GraphPanel = memo(function GraphPanel({
                 graph={graph}
                 layout={layout}
                 currentTime={now}
-                onOpenSubgraph={(label) => {
-                  const child = childGraphFor(graphs, agents, graph.agent, label)
+                onOpenSubgraph={(node) => {
+                  const child = subgraphOf(graphs, agents, graph.agent, node)
                   if (child) onAgentClick(child)
                 }}
-                canOpen={(label) => childGraphFor(graphs, agents, graph.agent, label) !== null}
+                canOpen={(node) => subgraphOf(graphs, agents, graph.agent, node) !== null}
               />
             </div>
             <GraphFooter graph={graph} layout={layout} />
@@ -156,8 +162,8 @@ interface GraphSvgProps {
   graph: AgentGraph
   layout: NonNullable<ReturnType<typeof layoutGraph>>
   currentTime: number
-  onOpenSubgraph: (label: string) => void
-  canOpen: (label: string) => boolean
+  onOpenSubgraph: (node: GraphNodeInfo) => void
+  canOpen: (node: GraphNodeInfo) => boolean
 }
 
 function GraphSvg({ graph, layout, currentTime, onOpenSubgraph, canOpen }: GraphSvgProps) {
@@ -198,14 +204,14 @@ function GraphSvg({ graph, layout, currentTime, onOpenSubgraph, canOpen }: Graph
         const node = graph.nodes[id]
         const box = layout.nodes.get(id)
         if (!node || !box) return null
-        const openable = node.kind === 'subgraph' && canOpen(node.label)
+        const openable = node.kind === 'subgraph' && canOpen(node)
         return (
           <GraphNodeBox
             key={id}
             node={node}
             box={box}
             openable={openable}
-            onOpen={openable ? () => onOpenSubgraph(node.label) : undefined}
+            onOpen={openable ? () => onOpenSubgraph(node) : undefined}
           />
         )
       })}
