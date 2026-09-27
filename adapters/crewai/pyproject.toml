@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-flow-crewai"
+version = "0.1.0"
+description = "Stream CrewAI crews and flows into the Agent Flow visualizer"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10,<3.14"
+dependencies = ["crewai>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["agent_flow_crewai"]
