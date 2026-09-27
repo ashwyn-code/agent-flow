@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-flow-openai-agents"
+version = "0.1.0"
+description = "Stream OpenAI Agents SDK runs into the Agent Flow visualizer"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = ["openai-agents>=0.2"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["agent_flow_openai_agents"]
