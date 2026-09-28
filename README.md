@@ -153,12 +153,18 @@ Press **Graph** in the top bar (it appears when a session has graph data) or `N`
 - **Counts:** `×N` on a node is how many times it ran, and `×N` on an edge is how many times that hop was taken.
 - **Live state:** the node running right now pulses amber, the hop just taken animates, and failed nodes are red.
 - **Drill-in:** subgraph nodes (`▸`) open the graph of the subagent they ran: a LangGraph subgraph, a nested Strands graph, an Agent Framework sub-workflow, a nested ADK workflow agent, or a crew started from a CrewAI Flow method. The breadcrumb takes you back up. Selecting an agent on the canvas also switches the panel to its graph.
+![Graph panel overlays on the incident-response workflow: errors, cost and time per node, then the time overlay inside the nested remediation workflow](docs/media/graph-overlays.gif)
+
 - **Metric overlays:** the Runs / Time / Tokens / Cost / Errors switch colors each node by how much of that it accounts for, labels it with the value, and names the top node in the footer. Time is summed over a node's runs. Tokens, cost and errors include the subagents the node ran. Cost uses the same per-model estimate as the `$Cost` view.
 - **All runs:** once the same graph has run more than once, a **This run / All runs** switch appears. All runs folds every run the UI has seen into one graph. Each OpenTelemetry trace, adapter run or ingest sender is a session, and parallel instances of a subgraph (`research_team #2`) each count as a run. Edges show the share of runs that took them, and never-taken routes stay dim. The overlays switch to per-run figures: share of runs visited, median/p95 time, median tokens, cost per run, and the share of runs with errors. Hover a node for all of them. Loading a trace file with `--otel-file` gives you this view over a whole batch of production runs.
+![All runs of a routing workflow: the share of runs taking each route, median/p95 node times and error rates, then Compare against another run with new and gone routes](docs/media/all-runs.gif)
+
 - **Compare:** diffs the selected run against another run of the same graph, by default the most recent other one; pick any from the list. Routes and nodes only this run took are green and marked `new`. Ones only the baseline took are red, dashed and marked `gone`. The overlays show each node's change in time, tokens, cost or errors (red when worse, green when better), and the footer compares duration, estimated cost, tokens, tool calls, errors and agents with the change in each. Use it to check a prompt or model change against the run before it.
 - **Replay:** scrubbing the timeline replays the graph state, and the overlays, too.
 
 ## Execution timeline
+
+![The swimlane timeline building live with the critical path highlighted, then scrubbing back through the run with each running agent's context and activity listed](docs/media/timeline.gif)
 
 Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, indented under the agent that started it, with each tool call as a bar and parallel calls stacked on their own rows. Hover a bar for its duration and details, and click one to select that agent.
 
@@ -168,9 +174,13 @@ Press **Timeline** (or `T`) for a swimlane view of the run: one lane per agent, 
 
 ## Canvas signals
 
+![Context gauges, a compaction flash, a failing tool with retry arcs, guardrails that pass and trip, and the Models legend spotlighting one model at a time](docs/media/canvas-signals.gif)
+
 - **Context gauge:** a ring around every agent fills as its context window does. It stays blue, turns amber above 80% and red above 90%, and shows the percentage past 70%. When context shrinks by 30% or more from a sizeable size (compaction or truncation), the ring collapses inward with a `context 168k → 52k` label.
 - **Failures:** a failed tool call sends red ripples out from its card and its agent. A call to the same tool that follows a failure is drawn as a retry: a dashed arc from the failed card, labelled with the attempt, and a `↻N` badge on the card.
 - **Guardrails:** tool calls named `guardrail: …` (as the OpenAI Agents adapter and the OpenTelemetry import report them) are drawn with a shield: a check when the check passed, a cross when it tripped.
+![A 25-agent run: the minimap, panning by dragging it, collapsing every subtree into +N nodes, and expanding them again](docs/media/large-runs.gif)
+
 - **Large runs:** right-click an agent with subagents and choose **Collapse subtree** to fold everything under it into a stacked hex with a `+N` badge. The badge pulses amber while something hidden is working and turns red if something hidden failed. The canvas menu adds **Collapse all subtrees**, which leaves the main agent and its direct children, and **Expand all**. Selecting a hidden agent elsewhere (timeline, Graph panel, message feed) unfolds its way back. A **minimap** in the bottom-right appears once there are 6 or more agents on screen, or when something is off screen. It shows every agent (by model color, collapsed ones ringed) and the part in view; click or drag it to move there. The canvas menu switches it between auto, on and off.
 - **Models:** each agent's outer ring is tinted by its model (Opus purple, Sonnet blue, Haiku teal, GPT green, Gemini amber; other models get a stable color of their own). The **Models** legend in the bottom-left lists the models in use with their agents, tokens and estimated cost. These are totals for the whole run, including agents that have finished, and use each agent's largest context. Hover a model to dim every other agent.
 
