@@ -44,6 +44,8 @@ Agent runs are a black box. You see the final result, not the journey. Agent Flo
 
 ## Getting Started
 
+New here? The **[user guide](docs/user-guide.md)** walks through every feature, from getting runs in (including hooking up OpenTelemetry, step by step) to the timeline, the Graph panel, comparing runs and sharing replays.
+
 ### Quick Start (no VS Code required)
 
 ```bash
@@ -228,6 +230,8 @@ export AGENT_FLOW_TOKEN=...
 Call `flush()` to wait for delivery (it also runs at exit). The shared implementation is [adapters/_shared/agent_flow_sink.py](adapters/_shared/agent_flow_sink.py). Each adapter carries a copy, kept identical by `python adapters/sync_sink.py`. Persistent storage and search aren't part of the relay; for production traffic, keep a real observability backend as your system of record.
 
 ## From OpenTelemetry traces
+
+> Step-by-step setup per framework, Collector recipes and troubleshooting are in the [user guide](docs/user-guide.md#3-hooking-up-opentelemetry).
 
 If your agents already emit OpenTelemetry traces, Agent Flow can draw them without an adapter. The relay is an OTLP/HTTP trace receiver (protobuf or JSON, plain or gzip), and the app can also read OTLP JSON files.
 
