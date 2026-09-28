@@ -4,13 +4,17 @@ import { drawHexagon } from './draw-misc'
 import { alphaHex } from '@/lib/utils'
 
 export interface VisualEffect {
-  type: 'spawn' | 'complete' | 'shatter'
+  type: 'spawn' | 'complete' | 'shatter' | 'compact' | 'error_ripple'
   x: number
   y: number
   color: string
   age: number
   duration: number
   particles?: Array<{ angle: number; speed: number; size: number }>
+  /** Text shown with the effect (e.g. how much context was compacted) */
+  label?: string
+  /** Size the effect starts from (e.g. the agent's context ring) */
+  radius?: number
 }
 
 export function drawEffects(ctx: CanvasRenderingContext2D, effects: VisualEffect[]) {
@@ -86,6 +90,57 @@ export function drawEffects(ctx: CanvasRenderingContext2D, effects: VisualEffect
         ctx.beginPath()
         ctx.arc(fx.x, fx.y, ringRadius + COMPLETE_FX.glowOuter, 0, Math.PI * 2)
         ctx.fill()
+        break
+      }
+
+      case 'compact': {
+        // Context shrank: the ring collapses inward, with a label that drifts up
+        const r0 = fx.radius ?? 40
+        const ease = 1 - Math.pow(1 - progress, 3)
+        const ringR = r0 * (1 - 0.45 * ease)
+        const alpha = 1 - progress
+        ctx.globalAlpha = alpha
+        ctx.setLineDash([3, 3])
+        ctx.lineDashOffset = progress * 24
+        ctx.beginPath()
+        ctx.arc(fx.x, fx.y, ringR, 0, Math.PI * 2)
+        ctx.strokeStyle = fx.color
+        ctx.lineWidth = 2.5 * (1 - progress) + 0.5
+        ctx.stroke()
+        ctx.setLineDash([])
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2
+          const d = r0 + 14 - ease * 16
+          ctx.beginPath()
+          ctx.fillStyle = fx.color
+          ctx.arc(fx.x + Math.cos(a) * d, fx.y + Math.sin(a) * d, 1.6 * (1 - progress) + 0.4, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        if (fx.label) {
+          ctx.font = '9px monospace'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'bottom'
+          ctx.fillStyle = fx.color
+          ctx.fillText(fx.label, fx.x, fx.y - r0 - 6 - ease * 14)
+        }
+        break
+      }
+
+      case 'error_ripple': {
+        // A failure: two red shockwaves spreading from where it happened
+        const r0 = fx.radius ?? 14
+        for (let i = 0; i < 2; i++) {
+          const p = Math.min(1, Math.max(0, (progress - i * 0.18) / 0.82))
+          if (p <= 0) continue
+          ctx.globalAlpha = (1 - p) * 0.75
+          ctx.beginPath()
+          ctx.arc(fx.x, fx.y, r0 + p * 46, 0, Math.PI * 2)
+          ctx.strokeStyle = fx.color
+          ctx.lineWidth = 2.2 * (1 - p) + 0.3
+          ctx.shadowColor = fx.color
+          ctx.shadowBlur = 8
+          ctx.stroke()
+        }
         break
       }
 

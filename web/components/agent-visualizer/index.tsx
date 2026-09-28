@@ -24,6 +24,9 @@ import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { TopBar, type ExclusivePanel } from "./top-bar"
 import { GraphPanel } from "./graph-panel"
+import { ModelLegend } from "./model-legend"
+import { agentsWithChildren, collapseAllTargets, collapsedAncestors } from "@/lib/collapse"
+import { buildReplayHtml, currentPageAssets, downloadFile, normalizeEvents, replayFileName } from "@/lib/replay-export"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
@@ -37,13 +40,13 @@ export function AgentVisualizer() {
     edges,
     discoveries,
     fileAttention,
-    timelineEntries,
     currentTime,
     isPlaying,
     speed,
     maxTimeReached,
     conversations,
     graphs,
+    eventLog,
     play,
     pause,
     restart,
@@ -72,6 +75,20 @@ export function AgentVisualizer() {
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
+  const [highlightModel, setHighlightModel] = useState<string | null>(null)
+  // Folded subtrees on the canvas, and the minimap mode
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const [minimap, setMinimap] = useState<'auto' | 'on' | 'off'>('auto')
+  const toggleCollapsed = useCallback((id: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  // Each session starts expanded
+  useEffect(() => { setCollapsed(new Set()) }, [bridge.selectedSessionId])
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: ExclusivePanel) => {
@@ -180,6 +197,17 @@ export function AgentVisualizer() {
   }, [seekToTime, maxTimeReached, play])
   useEffect(() => () => { if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current) }, [])
 
+  /** Seek to a time. `fit` re-frames the camera; `review` holds there in review mode. */
+  const handleSeek = useCallback((time: number, fit = true, review = false) => {
+    seekingRef.current = true
+    pause()
+    if (review) setIsReviewing(true)
+    seekToTime(time)
+    if (fit) setZoomToFitTrigger(n => n + 1)
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
+  }, [pause, seekToTime, seekingRef])
+
   const handleRestart = useCallback(() => {
     setIsReviewing(false)
     restart(true)
@@ -231,14 +259,58 @@ export function AgentVisualizer() {
     return all.sort((a, b) => a.timestamp - b.timestamp)
   }, [conversations, showTranscript])
 
+  // Selecting an agent that's folded away (from the timeline, graph or feed) unfolds it
+  useEffect(() => {
+    const id = selection.selectedAgentId
+    if (!id || collapsed.size === 0) return
+    const ancestors = collapsedAncestors(agents, id, collapsed)
+    if (ancestors.length) setCollapsed(prev => new Set([...prev].filter(a => !ancestors.includes(a))))
+  }, [selection.selectedAgentId, agents, collapsed])
+
+  // Export the session: a self-contained HTML replay, or its events as JSONL
+  const exportSession = useCallback(async (format: 'html' | 'jsonl') => {
+    const id = bridge.selectedSessionId
+    const events = (id && bridge.sessionEvents.get(id)) || eventLog
+    if (!events.length) {
+      window.alert('Nothing to export yet: this session has no events.')
+      return
+    }
+    const label = bridge.sessions.find(s => s.id === id)?.label ?? 'session'
+    if (format === 'jsonl') {
+      const lines = normalizeEvents(events).map(e => JSON.stringify(e)).join('\n') + '\n'
+      downloadFile(replayFileName(label, 'jsonl'), lines, 'application/x-ndjson')
+      return
+    }
+    try {
+      const { js, css } = await currentPageAssets()
+      downloadFile(replayFileName(label, 'html'), buildReplayHtml({ js, css, label, events, sessionId: id ?? undefined }), 'text/html')
+    } catch (err) {
+      window.alert(`Could not export a replay here: ${err instanceof Error ? err.message : String(err)}. You can export the events as JSONL and use \`pnpm replay:export\`.`)
+    }
+  }, [bridge.selectedSessionId, bridge.sessionEvents, bridge.sessions, eventLog])
+
+  const minimapLabel = minimap === 'auto' ? 'auto' : minimap === 'on' ? 'on' : 'off'
+  const nextMinimap = () => setMinimap(m => (m === 'auto' ? 'on' : m === 'on' ? 'off' : 'auto'))
+
   // Context menu items
+  const menuAgentId = selection.contextMenu?.agentId
   const contextMenuItems = selection.contextMenu ? (
-    selection.contextMenu.agentId ? [
+    menuAgentId ? [
+      ...(agentsWithChildren(agents).has(menuAgentId) || collapsed.has(menuAgentId)
+        ? [{ label: collapsed.has(menuAgentId) ? '▾  Expand subtree' : '▸  Collapse subtree', onClick: () => toggleCollapsed(menuAgentId) }]
+        : []),
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
     ] : [
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
+      { label: `🗺  Minimap: ${minimapLabel}`, onClick: nextMinimap },
+      { label: '', onClick: () => {}, separator: true },
+      { label: '⤓  Export replay (HTML)', onClick: () => { void exportSession('html') } },
+      { label: '⤓  Export events (JSONL)', onClick: () => { void exportSession('jsonl') } },
+      { label: '', onClick: () => {}, separator: true },
+      ...(collapseAllTargets(agents).length ? [{ label: '▸  Collapse all subtrees', onClick: () => { setCollapsed(new Set(collapseAllTargets(agents))); setZoomToFitTrigger(n => n + 1) } }] : []),
+      ...(collapsed.size ? [{ label: '▾  Expand all', onClick: () => { setCollapsed(new Set()); setZoomToFitTrigger(n => n + 1) } }] : []),
       { label: '', onClick: () => {}, separator: true },
       { label: '⟲  Restart', onClick: restart },
     ]
@@ -292,6 +364,18 @@ export function AgentVisualizer() {
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
         showCostOverlay={showCostOverlay}
+        highlightModel={highlightModel}
+        collapsed={collapsed}
+        minimap={minimap}
+      />
+
+      {/* Models in use, with running cost (bottom-left) */}
+      <ModelLegend
+        visible={!showTimeline}
+        events={eventLog}
+        currentTime={currentTime}
+        highlightModel={highlightModel}
+        onHighlight={setHighlightModel}
       />
 
       {/* Message feed panel (top-left) */}
@@ -365,14 +449,7 @@ export function AgentVisualizer() {
         onPlayPause={handlePlayPause}
         onRestart={handleRestart}
         onSpeedChange={setSpeed}
-        onSeek={(time) => {
-          seekingRef.current = true
-          pause()
-          seekToTime(time)
-          setZoomToFitTrigger(n => n + 1)
-          if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-          resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
-        }}
+        onSeek={(time) => handleSeek(time)}
         timelineEvents={timelineEvents}
         isReviewing={isReviewing}
         eventCount={timelineEvents.length}
@@ -401,6 +478,11 @@ export function AgentVisualizer() {
         visible={showGraph}
         graphs={graphs}
         agents={agents}
+        events={eventLog}
+        sessionEvents={bridge.sessionEvents}
+        sessionEventsVersion={bridge.sessionEventsVersion}
+        sessions={bridge.sessions}
+        currentSessionId={bridge.selectedSessionId}
         selectedAgentId={selection.selectedAgentId}
         currentTime={currentTime}
         isPlaying={isPlaying}
@@ -411,8 +493,13 @@ export function AgentVisualizer() {
       {/* Timeline panel (slide-in from bottom) */}
       <TimelinePanel
         visible={showTimeline}
-        timelineEntries={timelineEntries}
+        events={eventLog}
         currentTime={currentTime}
+        maxTime={maxTimeReached}
+        agents={agents}
+        conversations={conversations}
+        onSeek={(time) => handleSeek(time, false, true)}
+        onAgentClick={selection.handleAgentClick}
         onClose={() => setShowTimeline(false)}
       />
 

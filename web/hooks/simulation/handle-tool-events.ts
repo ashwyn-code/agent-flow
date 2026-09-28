@@ -1,3 +1,4 @@
+import type { ToolCallNode } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { TOOL_DEDUP_WINDOW_S } from '@/lib/canvas-constants'
 import { pushTimelineBlock, type ProcessEventContext, type MutableEventState } from './process-event'
@@ -42,6 +43,12 @@ export function handleToolCallStart(
 
     const toolId = `tool-${agentName}-${toolName}-${currentTime}`
 
+    // A call right after the same tool failed for this agent is a retry
+    let failed: ToolCallNode | undefined
+    for (const tc of state.toolCalls.values()) {
+      if (tc.agentId === agentName && tc.toolName === toolName && tc.state === 'error' && (!failed || tc.startTime >= failed.startTime)) failed = tc
+    }
+
     const pos = ctx.findToolSlot(agent, state.agents, state.toolCalls, currentTime)
 
     state.toolCalls.set(toolId, {
@@ -53,6 +60,7 @@ export function handleToolCallStart(
       y: pos.y,
       startTime: currentTime,
       opacity: 0,
+      ...(failed ? { retryOf: failed.id, attempt: (failed.attempt ?? 1) + 1 } : {}),
     })
 
     state.edges.push({ id: `edge-${toolId}`, from: agentName, to: toolId, type: 'tool', opacity: 0 })

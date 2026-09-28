@@ -223,10 +223,14 @@ export function useCanvasCamera({
     }
   }, [computeFitTransform])
 
+  /** Stop any auto-fit glide in progress (e.g. the user jumped via the minimap) */
+  const cancelCameraTarget = useCallback(() => { targetTransformRef.current = null }, [])
+
   return {
     transformRef,
     userHasNavigatedRef,
     panVelocityRef,
+    cancelCameraTarget,
     screenToCanvas,
     doZoomToFit,
     updateCamera,

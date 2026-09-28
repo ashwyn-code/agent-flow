@@ -21,6 +21,8 @@ import {
   detectStateChanges as detectStateChangesPure,
 } from './canvas/index'
 import { useCanvasCamera } from '@/hooks/use-canvas-camera'
+import { applyCollapse, type VisibleScene } from '@/lib/collapse'
+import { MINIMAP, computeMinimapFrame, drawMinimap, minimapToWorld, shouldShowMinimap, type MinimapFrame } from './canvas/draw-minimap'
 import { useCanvasInteraction } from '@/hooks/use-canvas-interaction'
 
 interface CanvasProps {
@@ -41,12 +43,18 @@ interface CanvasProps {
   onDiscoveryClick?: (discoveryId: string | null) => void
   selectedDiscoveryId?: string | null
   showCostOverlay?: boolean
+  /** Dim agents on other models (hovering the model legend) */
+  highlightModel?: string | null
+  /** Agents whose subtrees are folded away */
+  collapsed?: ReadonlySet<string>
+  /** Minimap: shown for bigger runs ('auto'), always, or never */
+  minimap?: 'auto' | 'on' | 'off'
 }
 
 export function AgentCanvas({
   simulationRef,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
-  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay,
+  onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId, showCostOverlay, highlightModel, collapsed, minimap = 'auto',
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -63,6 +71,12 @@ export function AgentCanvas({
   const effectsRef = useRef<VisualEffect[]>([])
   const prevAgentStatesRef = useRef<Map<string, string>>(new Map())
   const prevToolStatesRef = useRef<Map<string, string>>(new Map())
+  const prevTokensRef = useRef<Map<string, number>>(new Map())
+
+  // Collapsed subtrees: the visible scene, cached while its inputs are unchanged
+  const collapseCacheRef = useRef<{ key: unknown[]; scene: VisibleScene } | null>(null)
+  const minimapRef = useRef<HTMLCanvasElement>(null)
+  const minimapFrameRef = useRef<MinimapFrame | null>(null)
 
   // Rate-limited error logging for the draw loop (avoid flooding console)
   const lastDrawErrorRef = useRef(0)
@@ -93,7 +107,8 @@ export function AgentCanvas({
     agents: sim.agents, toolCalls: sim.toolCalls,
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-    showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+    showCostOverlay, selectedToolCallId, selectedDiscoveryId, highlightModel, collapsed, minimap,
+    collapsedSummaries: new Map() as VisibleScene['collapsed'],
     simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
     onToolCallClick, onDiscoveryClick,
@@ -104,7 +119,7 @@ export function AgentCanvas({
 
   // ─── Camera ─────────────────────────────────────────────────────────────
   const {
-    transformRef, userHasNavigatedRef, panVelocityRef,
+    transformRef, userHasNavigatedRef, panVelocityRef, cancelCameraTarget,
     screenToCanvas, doZoomToFit, updateCamera,
   } = useCanvasCamera({
     mainCanvasRef, drawPropsRef, simTimeRef, dimensions,
@@ -152,13 +167,14 @@ export function AgentCanvas({
 
   const detectStateChanges = useCallback(() => {
     const { agents, toolCalls } = drawPropsRef.current
-    const { effects, newAgentStates, newToolStates } = detectStateChangesPure(
+    const { effects, newAgentStates, newToolStates, newTokens } = detectStateChangesPure(
       agents, toolCalls,
-      prevAgentStatesRef.current, prevToolStatesRef.current,
+      prevAgentStatesRef.current, prevToolStatesRef.current, prevTokensRef.current,
     )
     effectsRef.current.push(...effects)
     prevAgentStatesRef.current = newAgentStates
     prevToolStatesRef.current = newToolStates
+    prevTokensRef.current = newTokens
   }, [])
 
   // ─── Main draw loop ────────────────────────────────────────────────────
@@ -180,18 +196,36 @@ export function AgentCanvas({
       {
         const s = simulationRef.current
         const p = drawPropsRef.current
-        p.agents = s.agents
-        p.toolCalls = s.toolCalls
-        p.particles = s.particles
-        p.edges = s.edges
-        p.discoveries = s.discoveries
+        const folded = p.collapsed
+        if (folded && folded.size > 0) {
+          // Leave collapsed subtrees out of drawing, fitting and hit-testing
+          const key = [s.agents, s.toolCalls, s.particles, s.edges, s.discoveries, folded]
+          const cache = collapseCacheRef.current
+          const scene = cache && cache.key.every((k, i) => k === key[i])
+            ? cache.scene
+            : applyCollapse({ agents: s.agents, toolCalls: s.toolCalls, edges: s.edges, particles: s.particles, discoveries: s.discoveries }, folded)
+          collapseCacheRef.current = { key, scene }
+          p.agents = scene.agents
+          p.toolCalls = scene.toolCalls
+          p.particles = scene.particles
+          p.edges = scene.edges
+          p.discoveries = scene.discoveries
+          p.collapsedSummaries = scene.collapsed
+        } else {
+          p.agents = s.agents
+          p.toolCalls = s.toolCalls
+          p.particles = s.particles
+          p.edges = s.edges
+          p.discoveries = s.discoveries
+          if (p.collapsedSummaries.size) p.collapsedSummaries = new Map()
+        }
         p.simTime = s.currentTime
       }
 
       const {
         agents, toolCalls, particles, edges, discoveries,
         selectedAgentId, hoveredAgentId, showStats, showHexGrid,
-        showCostOverlay, selectedToolCallId, selectedDiscoveryId,
+        showCostOverlay, selectedToolCallId, selectedDiscoveryId, highlightModel, collapsedSummaries, minimap,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
         isDragging,
       } = drawPropsRef.current
@@ -269,7 +303,7 @@ export function AgentCanvas({
       drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
-      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
+      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, highlightModel, collapsedSummaries)
       drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       if (showCostOverlay) drawCostLabels(ctx, agents, toolCalls)
       drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
@@ -284,6 +318,26 @@ export function AgentCanvas({
 
       if (showCostOverlay) drawCostSummaryPanel(ctx, agents, toolCalls)
       if (bloomRef.current) bloomRef.current.apply(canvas, ctx)
+
+      // Minimap (its own small canvas, drawn in the same frame)
+      const mini = minimapRef.current
+      if (mini) {
+        const show = minimap === 'on' || (minimap === 'auto' && shouldShowMinimap(agents, transformRef.current, w, h))
+        if (mini.style.display !== (show ? 'block' : 'none')) mini.style.display = show ? 'block' : 'none'
+        if (show) {
+          const mctx = mini.getContext('2d')
+          if (mctx) {
+            if (mini.width !== MINIMAP.width * dpr) {
+              mini.width = MINIMAP.width * dpr
+              mini.height = MINIMAP.height * dpr
+            }
+            mctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+            const frame = computeMinimapFrame(agents, toolCalls, transformRef.current, w, h)
+            minimapFrameRef.current = frame
+            drawMinimap(mctx, frame, agents, toolCalls, edges, collapsedSummaries, transformRef.current, w, h, timeRef.current)
+          }
+        }
+      }
 
       // ─── Performance overlay (enabled via ?perf or ?stress) ──────────
       if (PERF_OVERLAY_ENABLED) {
@@ -332,6 +386,20 @@ export function AgentCanvas({
 
   drawRef.current = draw
 
+  /** Center the view on the minimap point under the pointer. */
+  const jumpTo = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const frame = minimapFrameRef.current
+    if (!frame) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const world = minimapToWorld(frame, e.clientX - rect.left, e.clientY - rect.top)
+    const t = transformRef.current
+    const { width, height } = drawPropsRef.current.dimensions
+    userHasNavigatedRef.current = true
+    panVelocityRef.current.active = false
+    cancelCameraTarget()
+    transformRef.current = { x: width / 2 - world.x * t.scale, y: height / 2 - world.y * t.scale, scale: t.scale }
+  }, [transformRef, userHasNavigatedRef, panVelocityRef, cancelCameraTarget])
+
   useEffect(() => {
     const loop = (timestamp: number) => drawRef.current(timestamp)
     animationRef.current = requestAnimationFrame(loop)
@@ -346,6 +414,16 @@ export function AgentCanvas({
         style={{ width: dimensions.width, height: dimensions.height }}
         {...handlers}
         className="w-full h-full"
+      />
+      <canvas
+        ref={minimapRef}
+        className="absolute"
+        style={{ right: 12, bottom: 84, width: MINIMAP.width, height: MINIMAP.height, display: 'none', cursor: 'crosshair', zIndex: 5 }}
+        aria-label="Minimap: click or drag to move the view"
+        onMouseDown={e => { e.stopPropagation(); jumpTo(e) }}
+        onMouseMove={e => { if (e.buttons & 1) jumpTo(e) }}
+        onWheel={e => e.stopPropagation()}
+        onContextMenu={e => e.stopPropagation()}
       />
     </div>
   )
